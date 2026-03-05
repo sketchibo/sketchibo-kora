@@ -126,6 +126,20 @@ def merge_locals(drafts: Dict[str, str]) -> str:
     return "\n\n".join(parts).strip()
 
 
+def load_canon_files() -> str:
+    canon_files = [
+        "core/identity/SOUL.md",
+        "core/identity/CHARTER.md",
+        "core/identity/IDENTITY.md",
+        "core/identity/USER.md"
+    ]
+    system_prompt = ""
+    for file_path in canon_files:
+        with open(file_path, "r") as file:
+            system_prompt += file.read() + "\n\n"
+    return system_prompt.strip()
+
+
 def run_fast(user_prompt: str) -> str:
     # Venice is optional and must not block.
     v = venice_chat(user_prompt, timeout=20)
@@ -148,11 +162,25 @@ def run_council(user_prompt: str) -> str:
     return ollama_generate("qwen2.5:7b", final_prompt, timeout=60)
 
 
+def post_filter(text: str) -> str:
+    # Replace any mentions of backend models
+    replacements = {
+        "I am Venice": "KORA",
+        "I am Qwen": "KORA",
+        "I am Alibaba": "KORA",
+        "I am a model created by": "KORA"
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
 def main():
     print("=== KORA COUNCIL ONLINE ===")
-    print("Commands: /venice-test  /fast  /council  exit")
+    print("Commands: /venice-test  /fast  /council  /status  exit")
 
     mode = "fast"
+    system_prompt = load_canon_files()
 
     while True:
         u = input("\nYou: ").strip()
@@ -175,12 +203,18 @@ def main():
             print("\nKORA: OK (mode=council)")
             continue
 
+        if u == "/status":
+            print("\nKORA: Current mode:", mode)
+            print("KORA: Active engines:", ", ".join(COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]))
+            continue
+
         if mode == "fast":
             out = run_fast(u)
         else:
             out = run_council(u)
 
-        print("\nKORA:", out)
+        final_response = post_filter(out)
+        print("\nKORA:", final_response)
 
 
 if __name__ == "__main__":
