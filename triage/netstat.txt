@@ -1,0 +1,4 @@
+=== netstat -tulpen (fallback) ===
+Command 'netstat' not found, but can be installed with:
+apt install net-tools
+Please ask your administrator.

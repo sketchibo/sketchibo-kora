@@ -1,0 +1,1 @@
+=== recent files /tmp /var/tmp /dev/shm ===

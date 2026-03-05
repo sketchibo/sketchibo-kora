@@ -1,0 +1,9 @@
+=== ss -lntp ===
+State  Recv-Q Send-Q            Local Address:Port  Peer Address:PortProcess
+LISTEN 0      4096              127.0.0.53%lo:53         0.0.0.0:*          
+LISTEN 0      4096               100.95.0.101:42312      0.0.0.0:*          
+LISTEN 0      4096                 127.0.0.54:53         0.0.0.0:*          
+LISTEN 0      128                     0.0.0.0:22         0.0.0.0:*          
+LISTEN 0      4096   [fd7a:115c:a1e0::101:a3]:49527         [::]:*          
+LISTEN 0      4096                          *:11434            *:*          
+LISTEN 0      128                        [::]:22            [::]:*          

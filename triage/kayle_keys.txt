@@ -1,0 +1,4 @@
+=== kayle authorized_keys ===
+chmod 600 /home/kayle/.ssh/authorized_keys
+chown kayle:kayle /home/kayle/.ssh/authorized_keys
+systemctl restart ssh
