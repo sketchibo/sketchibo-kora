@@ -177,33 +177,37 @@ def post_filter(text: str) -> str:
 
 def main():
     print("Hey there! Welcome to KORA Council!")
-    print("Commands: /venice-test  /fast  /council  /status  exit")
+    print("Commands: help, test, fast, council, status, exit")
 
     mode = "fast"
     system_prompt = load_canon_files()
 
     while True:
-        u = input("\nYou: ").strip()
+        u = input("\nYou: ").strip().lower()
         if not u:
             continue
-        if u.lower() in ("exit", "quit"):
+        if u in ("exit", "quit"):
             break
 
-        if u == "/venice-test":
+        if u in ("help", "h"):
+            print("\nKORA: Available commands: help, test, fast, council, status, exit")
+            continue
+
+        if u in ("test", "t"):
             print("\nKORA:", venice_test())
             continue
 
-        if u == "/fast":
+        if u in ("fast", "f"):
             mode = "fast"
             print("\nKORA: OK (mode=fast)")
             continue
 
-        if u == "/council":
+        if u in ("council", "c"):
             mode = "council"
             print("\nKORA: OK (mode=council)")
             continue
 
-        if u == "/status":
+        if u in ("status", "s"):
             print("\nKORA: Current mode:", mode)
             print("KORA: Active engines:", ", ".join(COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]))
             continue
