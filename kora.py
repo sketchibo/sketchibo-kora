@@ -176,7 +176,7 @@ def post_filter(text: str) -> str:
 
 
 def main():
-    print("=== KORA COUNCIL ONLINE ===")
+    print("Hey there! Welcome to KORA Council!")
     print("Commands: /venice-test  /fast  /council  /status  exit")
 
     mode = "fast"
