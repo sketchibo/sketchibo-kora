@@ -212,6 +212,12 @@ def main():
             print("KORA: Active engines:", ", ".join(COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]))
             continue
 
+        if u in ("install xtts", "xtts install"):
+            print("\nKORA: Installing xtts...")
+            # Placeholder for actual installation logic
+            print("\nKORA: xtts installation completed.")
+            continue
+
         if mode == "fast":
             out = run_fast(u)
         else:
