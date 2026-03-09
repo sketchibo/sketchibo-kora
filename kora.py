@@ -8,8 +8,6 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
 VENICE_MODEL = "venice-uncensored"
 
-
-
 from kora_interpreter import interpret
 from kora_tools import (
     list_files,
@@ -184,6 +182,8 @@ def post_filter(text: str) -> str:
     for old, new in replacements.items():
         text = text.replace(old, new)
     return text
+
+
 def execute_task(task):
     intent = task.get("intent")
     args = task.get("args", {})
@@ -204,6 +204,7 @@ def execute_task(task):
         return get_system_status()
 
     return {"ok": False, "error": f"Unknown intent: {intent}"}
+
 
 def main():
     print("Hey there! Welcome to KORA Council!")
@@ -246,6 +247,12 @@ def main():
             print("\nKORA: Installing xtts...")
             # Placeholder for actual installation logic
             print("\nKORA: xtts installation completed.")
+            continue
+
+        task = interpret(u)
+        if task["mode"] == "action":
+            result = execute_task(task)
+            print(json.dumps(result))
             continue
 
         if mode == "fast":
