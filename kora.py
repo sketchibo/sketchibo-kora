@@ -8,6 +8,17 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
 VENICE_MODEL = "venice-uncensored"
 
+
+
+from kora_interpreter import interpret
+from kora_tools import (
+    list_files,
+    read_file,
+    tail_file,
+    search_files,
+    get_system_status,
+)
+
 # FAST mode default: just qwen
 FAST_LOCAL_MODELS = ["qwen2.5:7b"]
 
@@ -173,7 +184,26 @@ def post_filter(text: str) -> str:
     for old, new in replacements.items():
         text = text.replace(old, new)
     return text
+def execute_task(task):
+    intent = task.get("intent")
+    args = task.get("args", {})
 
+    if intent == "list_files":
+        return list_files(**args)
+
+    if intent == "read_file":
+        return read_file(**args)
+
+    if intent == "tail_file":
+        return tail_file(**args)
+
+    if intent == "search_files":
+        return search_files(**args)
+
+    if intent == "get_system_status":
+        return get_system_status()
+
+    return {"ok": False, "error": f"Unknown intent: {intent}"}
 
 def main():
     print("Hey there! Welcome to KORA Council!")
