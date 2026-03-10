@@ -212,10 +212,10 @@ def handle_interpreter_actions(user_input: str) -> str:
     return "Unknown command"
 
 def main():
+    mode = "fast"  # Initialize mode here
     print("Hey there! Welcome to KORA Council!")
     print("Commands: help, test, fast, council, status, exit")
 
-    mode = "fast"
     system_prompt = load_canon_files()
 
     while True:
