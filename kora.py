@@ -1,21 +1,13 @@
 import os
 import json
+import subprocess
 import requests
 from typing import Dict, List, Optional
-
+from kora_interpreter import interpret
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 
 VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
 VENICE_MODEL = "venice-uncensored"
-
-from kora_interpreter import interpret
-from kora_tools import (
-    list_files,
-    read_file,
-    tail_file,
-    search_files,
-    get_system_status,
-)
 
 # FAST mode default: just qwen
 FAST_LOCAL_MODELS = ["qwen2.5:7b"]
@@ -184,27 +176,36 @@ def post_filter(text: str) -> str:
     return text
 
 
-def execute_task(task):
-    intent = task.get("intent")
-    args = task.get("args", {})
 
-    if intent == "list_files":
-        return list_files(**args)
+def save_tts(text):
+    api = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+    if not api or not voice or not text.strip():
+        return
 
-    if intent == "read_file":
-        return read_file(**args)
+    out_path = os.path.expanduser("~/kora/last_reply.mp3")
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=mp3_44100_128"
+    payload = json.dumps({
+        "text": text,
+        "model_id": "eleven_multilingual_v2"
+    })
 
-    if intent == "tail_file":
-        return tail_file(**args)
-
-    if intent == "search_files":
-        return search_files(**args)
-
-    if intent == "get_system_status":
-        return get_system_status()
-
-    return {"ok": False, "error": f"Unknown intent: {intent}"}
-
+    try:
+        subprocess.run(
+            [
+                "curl", "-sS", "-X", "POST", url,
+                "-H", f"xi-api-key: {api}",
+                "-H", "Content-Type: application/json",
+                "-d", payload,
+                "--output", out_path,
+            ],
+            check=True,
+            timeout=60,
+        )
+        if os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
+            print("[TTS saved: ~/kora/last_reply.mp3]")
+    except Exception:
+        pass
 
 def main():
     print("Hey there! Welcome to KORA Council!")
@@ -213,55 +214,52 @@ def main():
     mode = "fast"
     system_prompt = load_canon_files()
 
-    while True:
-        u = input("\nYou: ").strip().lower()
-        if not u:
-            continue
-        if u in ("exit", "quit"):
-            break
+while True:
+    raw = input("\nYou: ").strip()
+    u = raw.lower()
+    if not u:
+        continue
 
-        if u in ("help", "h"):
-            print("\nKORA: Available commands: help, test, fast, council, status, exit")
-            continue
+    if u in ("exit", "quit"):
+        break
 
-        if u in ("test", "t"):
-            print("\nKORA:", venice_test())
-            continue
+    if u in ("help", "h"):
+        print("\nKORA: Available commands: help, test, fast, council, status, exit")
+        continue
 
-        if u in ("fast", "f"):
-            mode = "fast"
-            print("\nKORA: OK (mode=fast)")
-            continue
+    if u in ("test", "t"):
+        print("\nKORA:", venice_test())
+        continue
 
-        if u in ("council", "c"):
-            mode = "council"
-            print("\nKORA: OK (mode=council)")
-            continue
+    if u in ("fast", "f"):
+        mode = "fast"
+        print("\nKORA: OK (mode=fast)")
+        continue
 
-        if u in ("status", "s"):
-            print("\nKORA: Current mode:", mode)
-            print("KORA: Active engines:", ", ".join(COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]))
-            continue
+    if u in ("council", "c"):
+        mode = "council"
+        print("\nKORA: OK (mode=council)")
+        continue
 
-        if u in ("install xtts", "xtts install"):
-            print("\nKORA: Installing xtts...")
-            # Placeholder for actual installation logic
-            print("\nKORA: xtts installation completed.")
-            continue
+    if u in ("status", "s"):
+        print("\nKORA: Current mode:", mode)
+        print("KORA: Active engines:", ", ".join(COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]))
+        continue
 
-        task = interpret(u)
-        if task["mode"] == "action":
-            result = execute_task(task)
-            print(json.dumps(result))
-            continue
+    if u in ("install xtts", "xtts install"):
+        print("\nKORA: Installing xtts...")
+        # Placeholder for actual installation logic
+        print("\nKORA: xtts installation completed.")
+        continue
+    if mode == "fast":
+        out = run_fast(u)
+    else:
+        out = run_council(u)
 
-        if mode == "fast":
-            out = run_fast(u)
-        else:
-            out = run_council(u)
+    final_response = post_filter(out)
+    print("\nKORA:", final_response)
+    save_tts(final_response)
 
-        final_response = post_filter(out)
-        print("\nKORA:", final_response)
 
 
 if __name__ == "__main__":
