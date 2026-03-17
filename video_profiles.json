@@ -1,0 +1,28 @@
+{
+  "providers": [
+    {
+      "name": "venice",
+      "enabled": true,
+      "cost_rank": 2,
+      "speed_rank": 2,
+      "quality_rank": 1,
+      "ideal_shot_types": ["hero", "portrait", "environment", "closing"]
+    },
+    {
+      "name": "cheap-fast-general",
+      "enabled": true,
+      "cost_rank": 1,
+      "speed_rank": 1,
+      "quality_rank": 3,
+      "ideal_shot_types": ["documentary", "concept", "environment"]
+    },
+    {
+      "name": "cheap-stylized",
+      "enabled": true,
+      "cost_rank": 1,
+      "speed_rank": 2,
+      "quality_rank": 4,
+      "ideal_shot_types": ["concept", "documentary"]
+    }
+  ]
+}
