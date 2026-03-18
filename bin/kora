@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+cd ~/kora || exit 1
+exec python3 kora.py

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+cd ~/kora || exit 1
+export OLLAMA_API_BASE="http://127.0.0.1:11434"
+exec aider --model ollama/qwen2.5:7b --no-show-model-warnings
