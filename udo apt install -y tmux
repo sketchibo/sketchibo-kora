@@ -1,0 +1,98 @@
+[1mdiff --git a/kora.py b/kora.py[m
+[1mindex a280284..b3874c1 100644[m
+[1m--- a/kora.py[m
+[1m+++ b/kora.py[m
+[36m@@ -8,15 +8,6 @@[m [mOLLAMA_URL = "http://127.0.0.1:11434/api/generate"[m
+ VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"[m
+ VENICE_MODEL = "venice-uncensored"[m
+ [m
+[31m-from kora_interpreter import interpret[m
+[31m-from kora_tools import ([m
+[31m-    list_files,[m
+[31m-    read_file,[m
+[31m-    tail_file,[m
+[31m-    search_files,[m
+[31m-    get_system_status,[m
+[31m-)[m
+[31m-[m
+ # FAST mode default: just qwen[m
+ FAST_LOCAL_MODELS = ["qwen2.5:7b"][m
+ [m
+[36m@@ -149,21 +140,24 @@[m [mdef load_canon_files() -> str:[m
+     return system_prompt.strip()[m
+ [m
+ [m
+[31m-def run_fast(user_prompt: str) -> str:[m
+[32m+[m[32mdef run_fast(system_prompt: str, user_prompt: str) -> str:[m
+[32m+[m[32m    full_prompt = f"{system_prompt}\n\nUser: {user_prompt}"[m
+     # Venice is optional and must not block.[m
+[31m-    v = venice_chat(user_prompt, timeout=20)[m
+[32m+[m[32m    v = venice_chat(full_prompt, timeout=20)[m
+     if v:[m
+         return v[m
+[31m-    return ollama_generate(FAST_LOCAL_MODELS[0], user_prompt, timeout=60)[m
+[32m+[m[32m    return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)[m
+ [m
+ [m
+[31m-def run_council(user_prompt: str) -> str:[m
+[32m+[m[32mdef run_council(system_prompt: str, user_prompt: str) -> str:[m
+[32m+[m[32m    full_prompt = f"{system_prompt}\n\nUser: {user_prompt}"[m
+     drafts = {}[m
+     for model in COUNCIL_LOCAL_MODELS:[m
+[31m-        drafts[model] = ollama_generate(model, user_prompt, timeout=60)[m
+[32m+[m[32m        drafts[model] = ollama_generate(model, full_prompt, timeout=60)[m
+     merged = merge_locals(drafts)[m
+     # Final synthesis locally (never Venice-gated)[m
+     final_prompt = ([m
+[32m+[m[32m        f"{system_prompt}\n\n"[m
+         "You are KORA. Merge the following drafts into one best answer.\n\n"[m
+         f"{merged}\n\n"[m
+         "Return a single clear response."[m
+[36m@@ -184,28 +178,6 @@[m [mdef post_filter(text: str) -> str:[m
+     return text[m
+ [m
+ [m
+[31m-def execute_task(task):[m
+[31m-    intent = task.get("intent")[m
+[31m-    args = task.get("args", {})[m
+[31m-[m
+[31m-    if intent == "list_files":[m
+[31m-        return list_files(**args)[m
+[31m-[m
+[31m-    if intent == "read_file":[m
+[31m-        return read_file(**args)[m
+[31m-[m
+[31m-    if intent == "tail_file":[m
+[31m-        return tail_file(**args)[m
+[31m-[m
+[31m-    if intent == "search_files":[m
+[31m-        return search_files(**args)[m
+[31m-[m
+[31m-    if intent == "get_system_status":[m
+[31m-        return get_system_status()[m
+[31m-[m
+[31m-    return {"ok": False, "error": f"Unknown intent: {intent}"}[m
+[31m-[m
+[31m-[m
+ def main():[m
+     print("Hey there! Welcome to KORA Council!")[m
+     print("Commands: help, test, fast, council, status, exit")[m
+[36m@@ -249,16 +221,10 @@[m [mdef main():[m
+             print("\nKORA: xtts installation completed.")[m
+             continue[m
+ [m
+[31m-        task = interpret(u)[m
+[31m-        if task["mode"] == "action":[m
+[31m-            result = execute_task(task)[m
+[31m-            print(json.dumps(result))[m
+[31m-            continue[m
+[31m-[m
+         if mode == "fast":[m
+[31m-            out = run_fast(u)[m
+[32m+[m[32m            out = run_fast(system_prompt, u)[m
+         else:[m
+[31m-            out = run_council(u)[m
+[32m+[m[32m            out = run_council(system_prompt, u)[m
+ [m
+         final_response = post_filter(out)[m
+         print("\nKORA:", final_response)[m

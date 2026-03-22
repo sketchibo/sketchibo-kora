@@ -1,0 +1,90 @@
+import re
+from typing import Dict, Any, Optional
+
+
+def interpret(user_input: str) -> Dict[str, Any]:
+    """
+    First-pass hybrid-ish interpreter:
+    - recognizes direct action patterns
+    - falls back to chat mode if nothing matches
+    """
+    text = user_input.strip()
+    lower = text.lower()
+
+    # 1. status
+    if lower in {"status", "kora status", "system status", "health"}:
+        return {
+            "mode": "action",
+            "intent": "get_system_status",
+            "args": {},
+            "confidence": 0.99
+        }
+
+    # 2. list files / list folder
+    m = re.search(r"^(?:kora\s+)?(?:list|show)\s+(?:files|folder|dir|directory)(?:\s+in\s+(.+))?$", lower)
+    if m:
+        path = (m.group(1) or ".").strip().strip('"').strip("'")
+        return {
+            "mode": "action",
+            "intent": "list_files",
+            "args": {"path": path},
+            "confidence": 0.95
+        }
+
+    # 3. read file
+    m = re.search(r"^(?:kora\s+)?(?:read|open|show)\s+file\s+(.+)$", lower)
+    if m:
+        path = m.group(1).strip().strip('"').strip("'")
+        return {
+            "mode": "action",
+            "intent": "read_file",
+            "args": {"path": path},
+            "confidence": 0.94
+        }
+
+    # 4. tail file / show last lines
+    m = re.search(r"^(?:kora\s+)?(?:tail|show last)\s+(.+?)(?:\s+(\d+)\s+lines?)?$", lower)
+    if m:
+        path = m.group(1).strip().strip('"').strip("'")
+        lines = int(m.group(2)) if m.group(2) else 80
+        return {
+            "mode": "action",
+            "intent": "tail_file",
+            "args": {"path": path, "lines": lines},
+            "confidence": 0.90
+        }
+
+    # 5. search files
+    # examples:
+    # search for council
+    # search logs for qwen
+    # find "council online" in logs
+    m = re.search(r'^(?:kora\s+)?(?:search|find)\s+(?:for\s+)?["\']?(.+?)["\']?(?:\s+in\s+(.+))?$', lower)
+    if m and len(m.group(1).strip()) > 1:
+        query = m.group(1).strip().strip('"').strip("'")
+        root = (m.group(2) or ".").strip().strip('"').strip("'")
+        return {
+            "mode": "action",
+            "intent": "search_files",
+            "args": {"query": query, "root": root},
+            "confidence": 0.82
+        }
+
+    # 6. fallback = chat
+    return {
+        "mode": "chat",
+        "intent": "chat",
+        "args": {"text": text},
+        "confidence": 0.50
+    }
+if __name__ == "__main__":
+    while True:
+        try:
+            text = input("interp> ").strip()
+            if text in {"exit", "quit"}:
+                break
+            print(interpret(text))
+        except KeyboardInterrupt:
+            break
+        except EOFError:
+            break

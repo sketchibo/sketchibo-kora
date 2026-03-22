@@ -1,0 +1,5 @@
+
+NEXT:
+- council voice cleanup
+- multiline paste handling
+- memory view polish

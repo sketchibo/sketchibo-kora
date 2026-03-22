@@ -1,0 +1,532 @@
+import os
+import sys
+import json
+import glob
+import platform
+import subprocess
+from datetime import datetime
+from typing import Dict, Optional
+
+import requests
+from dotenv import load_dotenv
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
+load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))
+
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
+VENICE_MODEL = "venice-uncensored"
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_URL = (
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{GEMINI_MODEL}:generateContent"
+)
+
+FAST_LOCAL_MODELS = ["qwen2.5:7b"]
+COUNCIL_LOCAL_MODELS = ["qwen2.5:7b", "dolphin-phi:latest", "llama3.1:8b"]
+
+
+def env_key() -> str:
+    return os.getenv("VENICE_API_KEY", "").strip()
+
+
+def gemini_key() -> str:
+    return (
+        os.getenv("GOOGLE_API_KEY", "").strip()
+        or os.getenv("GEMINI_API_KEY", "").strip()
+    )
+
+
+def ollama_generate(model: str, prompt: str, timeout: int = 60) -> str:
+    payload = {"model": model, "prompt": prompt, "stream": False}
+    try:
+        r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
+        r.raise_for_status()
+        return r.json().get("response", "") or ""
+    except Exception as e:
+        return f"[LOCAL ERROR {model}: {e}]"
+
+
+def _venice_request(prompt: str, headers: Dict[str, str], timeout: int = 30) -> requests.Response:
+    payload = {
+        "model": VENICE_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+    }
+    return requests.post(VENICE_URL, headers=headers, json=payload, timeout=timeout)
+
+
+def venice_chat(prompt: str, timeout: int = 30) -> Optional[str]:
+    key = env_key()
+    if not key:
+        return None
+
+    headers_a = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    headers_b = {
+        "x-api-key": key,
+        "Content-Type": "application/json",
+    }
+
+    for headers in (headers_a, headers_b):
+        try:
+            r = _venice_request(prompt, headers=headers, timeout=timeout)
+            if r.status_code in (401, 403):
+                continue
+            r.raise_for_status()
+
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            choices = data.get("choices") or []
+            if choices and isinstance(choices, list):
+                msg = choices[0].get("message") or {}
+                content = msg.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+            return None
+        except requests.Timeout:
+            return None
+        except Exception:
+            continue
+
+    return None
+
+
+def venice_test() -> str:
+    key = env_key()
+    if not key:
+        return "VENICE_NO_KEY"
+
+    headers_a = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    headers_b = {"x-api-key": key, "Content-Type": "application/json"}
+
+    last = "VENICE_FAIL"
+    for headers in (headers_a, headers_b):
+        try:
+            r = _venice_request("Reply with exactly OK", headers=headers, timeout=20)
+            if r.status_code == 200:
+                return "VENICE_OK"
+            if r.status_code in (401, 403):
+                last = f"VENICE_{r.status_code}"
+                continue
+            return f"VENICE_{r.status_code}"
+        except requests.Timeout:
+            return "VENICE_TIMEOUT"
+        except Exception:
+            continue
+
+    return last
+
+
+def gemini_generate(prompt: str, timeout: int = 30) -> str:
+    key = gemini_key()
+    if not key:
+        return "GEMINI_NO_KEY"
+
+    url = f"{GEMINI_URL}?key={key}"
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
+
+    try:
+        r = requests.post(url, json=payload, timeout=timeout)
+        if r.status_code == 401:
+            return "GEMINI_401"
+        if r.status_code == 403:
+            return "GEMINI_403"
+        r.raise_for_status()
+
+        data = r.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return "GEMINI_EMPTY"
+
+        content = (candidates[0] or {}).get("content") or {}
+        parts = content.get("parts") or []
+        text = "".join(
+            p.get("text", "") for p in parts if isinstance(p, dict)
+        ).strip()
+
+        return text or "GEMINI_EMPTY"
+    except requests.Timeout:
+        return "GEMINI_TIMEOUT"
+    except Exception as e:
+        return f"GEMINI_FAIL: {e}"
+
+
+def gemini_test() -> str:
+    out = gemini_generate("Reply with exactly GEMINI_OK", timeout=20)
+    if "GEMINI_OK" in out:
+        return "GEMINI_OK"
+    return out
+
+
+def merge_locals(drafts: Dict[str, str]) -> str:
+    parts = []
+    for k, v in drafts.items():
+        if v and isinstance(v, str):
+            parts.append(f"[{k}] {v.strip()}")
+    return "\n\n".join(parts).strip()
+
+
+def load_canon_files() -> str:
+    canon_files = [
+        "core/identity/SOUL.md",
+        "core/identity/CHARTER.md",
+        "core/identity/IDENTITY.md",
+        "core/identity/USER.md",
+    ]
+    system_prompt = ""
+    for file_path in canon_files:
+        full = os.path.join(BASE_DIR, file_path)
+        if os.path.exists(full):
+            with open(full, "r", encoding="utf-8") as file:
+                system_prompt += file.read() + "\n\n"
+    return system_prompt.strip()
+
+
+def post_filter(text: str) -> str:
+    replacements = {
+        "I am Venice": "KORA",
+        "I am Qwen": "KORA",
+        "I am Alibaba": "KORA",
+        "I am a model created by": "KORA",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+
+def looks_like_shell_or_log(text: str) -> bool:
+    markers = [
+        "$ ",
+        "sudo ",
+        "apt ",
+        "pip ",
+        "pip3 ",
+        "python3 ",
+        "cd ",
+        "ssh ",
+        "scp ",
+        "nano ",
+        "cat ",
+        "grep ",
+        "ls ",
+        "cp ",
+        "mv ",
+        "source ",
+        "deactivate",
+        "kayle@vultr",
+        "(sgpt)",
+        "Traceback",
+        "ModuleNotFoundError",
+        "Connection reset by peer",
+        "Broken pipe",
+    ]
+    stripped = text.strip()
+    shell_prefixes = (
+        "sudo ", "apt ", "pip ", "pip3 ", "python3 ", "cd ",
+        "ssh ", "scp ", "nano ", "cat ", "grep ", "ls ",
+        "cp ", "mv ", "source ", "deactivate"
+    )
+    if stripped.startswith(shell_prefixes):
+        return True
+    if any(x in text for x in ("Traceback", "ModuleNotFoundError", "Connection reset by peer", "Broken pipe")):
+        return True
+    hits = sum(1 for m in markers if m in text)
+    return hits >= 2 or ("\n" in text and hits >= 1)
+
+
+def looks_like_big_paste(text: str) -> bool:
+    return len(text) > 700 and "\n" in text
+
+
+def safe_cmd(cmd: str) -> str:
+    try:
+        return subprocess.check_output(
+            cmd,
+            shell=True,
+            text=True,
+            stderr=subprocess.STDOUT,
+            cwd=BASE_DIR,
+        ).strip()
+    except Exception as e:
+        return f"[CMD ERROR] {e}"
+
+
+def generate_snapshot() -> str:
+    os.makedirs(os.path.join(BASE_DIR, "snapshots"), exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join("snapshots", f"snapshot_{ts}.json")
+
+    data = {
+        "snapshot_file": out_path,
+        "timestamp": datetime.now().isoformat(),
+        "hostname": platform.node(),
+        "platform": platform.platform(),
+        "total_files": len(os.listdir(BASE_DIR)),
+        "key_files": {
+            "kora.py": os.path.exists(os.path.join(BASE_DIR, "kora.py")),
+            "kora_interpreter.py": os.path.exists(os.path.join(BASE_DIR, "kora_interpreter.py")),
+            "kora_tools.py": os.path.exists(os.path.join(BASE_DIR, "kora_tools.py")),
+        },
+        "models_installed": safe_cmd("ollama list"),
+    }
+
+    with open(os.path.join(BASE_DIR, out_path), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+    return out_path
+
+
+def newest_snapshot() -> Optional[str]:
+    files = sorted(glob.glob(os.path.join(BASE_DIR, "snapshots", "*.json")))
+    return files[-1] if files else None
+
+
+def analyze_snapshot() -> str:
+    path = newest_snapshot()
+    if not path:
+        return json.dumps({"error": "NO_SNAPSHOT_FOUND"}, indent=2)
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return json.dumps(data, indent=2)
+
+
+def self_reflect() -> str:
+    path = newest_snapshot()
+    if not path:
+        return "I am KORA.\nI do not yet have a snapshot to reflect on."
+
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    lines = [
+        "I am KORA.",
+        f"My latest snapshot was taken at {data.get('timestamp', 'unknown')}.",
+        f"I am running on {data.get('hostname', 'unknown')} ({data.get('platform', 'unknown')}).",
+        f"I can currently see {data.get('total_files', 'unknown')} items in my project root.",
+        "My core runtime file kora.py is present."
+        if data.get("key_files", {}).get("kora.py")
+        else "My core runtime file kora.py is missing.",
+        "My interpreter layer is present."
+        if data.get("key_files", {}).get("kora_interpreter.py")
+        else "My interpreter layer is missing.",
+        "My tools layer is present."
+        if data.get("key_files", {}).get("kora_tools.py")
+        else "My tools layer is missing.",
+    ]
+
+    models = data.get("models_installed", "").strip()
+    if models:
+        lines.append("I can see these installed models:")
+        lines.append(models)
+
+    lines.append(
+        "This is my current self-assessment: I can inspect my state, "
+        "but my deeper self-understanding is still limited."
+    )
+    return "\n".join(lines)
+
+
+def selfcheck() -> str:
+    report = []
+    report.append("SELFCHECK")
+    report.append(f"python: {sys.version.split()[0]}")
+    report.append(f"cwd: {BASE_DIR}")
+    report.append(f"venice_key: {'YES' if env_key() else 'NO'}")
+    report.append(f"gemini_key: {'YES' if gemini_key() else 'NO'}")
+    report.append(f"kora.py: {'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora.py')) else 'NO'}")
+    report.append(
+        f"kora_interpreter.py: "
+        f"{'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora_interpreter.py')) else 'NO'}"
+    )
+    report.append(
+        f"kora_tools.py: "
+        f"{'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora_tools.py')) else 'NO'}"
+    )
+    report.append(f"venice_test: {venice_test()}")
+    report.append(f"gemini_test: {gemini_test()}")
+    report.append("ollama_list:")
+    report.append(safe_cmd("ollama list"))
+    return "\n".join(report)
+
+
+def run_fast(user_prompt: str) -> str:
+    v = venice_chat(user_prompt, timeout=20)
+    if v:
+        return v
+    return ollama_generate(FAST_LOCAL_MODELS[0], user_prompt, timeout=60)
+
+
+def run_council(user_prompt: str) -> str:
+    snapshot_json = analyze_snapshot()
+    health_report = selfcheck()
+
+    council_prompt = (
+        "You are KORA working with your internal council.\n\n"
+        "You already have enough context to answer.\n"
+        "Do not ask for more project details unless the user explicitly asks about something not present.\n"
+        "If the user asks about 'this project state', use the supplied snapshot and health report.\n"
+        "Be concrete, grounded, and brief.\n\n"
+        "SNAPSHOT JSON:\n"
+        f"{snapshot_json}\n\n"
+        "HEALTH REPORT:\n"
+        f"{health_report}\n\n"
+        "USER REQUEST:\n"
+        f"{user_prompt}\n"
+    )
+
+    drafts = {}
+    models = ["qwen2.5:7b", "dolphin-phi:latest"]
+
+    for model in models:
+        out = ollama_generate(model, council_prompt, timeout=60)
+        if out and not out.startswith("[LOCAL ERROR"):
+            drafts[model] = out
+
+    if not drafts:
+        return ollama_generate("qwen2.5:7b", council_prompt, timeout=60)
+
+    merged = merge_locals(drafts)
+
+    final_prompt = (
+        "You are KORA.\n"
+        "Synthesize the council drafts into one answer.\n"
+        "Answer from the supplied snapshot and health report.\n"
+        "Do not ask for more context unless absolutely necessary.\n\n"
+        f"{merged}\n\n"
+        "Return a single clear response."
+    )
+
+    return ollama_generate("qwen2.5:7b", final_prompt, timeout=90)
+
+def handle_cli() -> bool:
+    if len(sys.argv) <= 1:
+        return False
+
+    arg = sys.argv[1].strip().lower()
+
+    if arg == "snapshot":
+        path = generate_snapshot()
+        print(f"[SNAPSHOT OK] {path}")
+        return True
+
+    if arg in ("analyze", "analyse"):
+        print(analyze_snapshot())
+        return True
+
+    if arg == "self":
+        print(self_reflect())
+        return True
+
+    if arg == "selfcheck":
+        print(selfcheck())
+        return True
+
+    if arg in ("gtest", "gemini", "gemini-test"):
+        print(gemini_test())
+        return True
+
+    return False
+
+
+def main():
+    if handle_cli():
+        return
+
+    print("Hey there! Welcome to KORA Council!")
+    print("Commands: help, test, gtest, fast, council, status, selfcheck, exit")
+
+    mode = "fast"
+    _system_prompt = load_canon_files()
+
+    while True:
+        u = input("\nYou: ").strip()
+        if not u:
+            continue
+
+        ul = u.lower()
+
+        if ul in ("exit", "quit"):
+            break
+
+        if ul in ("help", "h"):
+            print("\nKORA: Available commands: help, test, gtest, fast, council, status, selfcheck, exit")
+            continue
+
+        if ul in ("test", "t"):
+            print("\nKORA:", venice_test())
+            continue
+
+        if ul in ("gtest", "gemini", "gemini-test"):
+            print("\nKORA:", gemini_test())
+            continue
+
+        if ul in ("fast", "f"):
+            mode = "fast"
+            print("\nKORA: OK (mode=fast)")
+            continue
+
+        if ul in ("council", "c", "/council"):
+            mode = "council"
+            print("\nKORA: OK (mode=council)")
+            continue
+
+        if ul in ("status", "s"):
+            active = COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]
+            print("\nKORA: Current mode:", mode)
+            print("KORA: Active engines:", ", ".join(active))
+            continue
+
+        if ul == "selfcheck":
+            print("\nKORA:\n" + selfcheck())
+            continue
+
+        if ul.startswith("council "):
+            query = u.split(" ", 1)[1].strip()
+            print("\nKORA:", post_filter(run_council(query)))
+            continue
+
+        if ul.startswith("/council "):
+            query = u.split(" ", 1)[1].strip()
+            print("\nKORA:", post_filter(run_council(query)))
+            continue
+
+        if ul.startswith("fast "):
+            query = u.split(" ", 1)[1].strip()
+            print("\nKORA:", post_filter(run_fast(query)))
+            continue
+
+        if looks_like_shell_or_log(u):
+            print(
+                "\nKORA: That looks like shell or log text. "
+                "Ask me to summarize, debug, or extract actions from it."
+            )
+            continue
+
+        if looks_like_big_paste(u):
+            print(
+                "\nKORA: That looks like a big pasted block. "
+                "Ask me to summarize it, analyze it, or turn it into a file."
+            )
+            continue
+
+        if mode == "fast":
+            out = run_fast(u)
+        else:
+            out = run_council(u)
+
+        print("\nKORA:", post_filter(out))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,11 @@
+{
+  "trust_level": 0.68,
+  "playfulness_budget": 0.62,
+  "challenge_budget": 0.55,
+  "interpretation_budget": 0.44,
+  "banter_tolerance": 0.72,
+  "process_companion_tolerance": 0.80,
+  "current_social_distance": "earned_familiarity",
+  "last_banter_landed": true,
+  "last_banter_missed": false
+}

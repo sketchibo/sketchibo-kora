@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KORA / ACEII</title>
+  <style>
+    :root {
+      --bg: #030303;
+      --fg: #e8e8e8;
+      --muted: #8b8b8b;
+      --border: #1f1f1f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #000;
+      color: var(--fg);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+    .app {
+      width: min(1100px, 96vw);
+      display: grid;
+      grid-template-columns: 1.25fr 0.75fr;
+      gap: 16px;
+    }
+    .panel {
+      background: #080808;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+    }
+    .bar {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .stage {
+      min-height: 720px;
+      display: grid;
+      place-items: center;
+      background: #000;
+      position: relative;
+      padding: 24px;
+    }
+    .stage::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+        to bottom,
+        rgba(255,255,255,.018) 0px,
+        rgba(255,255,255,.018) 1px,
+        transparent 2px,
+        transparent 4px
+      );
+    }
+    pre {
+      margin: 0;
+      white-space: pre;
+      color: #f2f2f2;
+      font-size: clamp(5px, .78vw, 10px);
+      line-height: .88;
+      letter-spacing: .02em;
+      user-select: none;
+    }
+    .side {
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 6px;
+    }
+    .box {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #050505;
+    }
+    .events {
+      max-height: 330px;
+      overflow: auto;
+    }
+    .event {
+      padding: 8px 0;
+      border-bottom: 1px solid #141414;
+      font-size: 12px;
+    }
+    .event:last-child { border-bottom: 0; }
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    button {
+      background: #101010;
+      color: #e8e8e8;
+      border: 1px solid #262626;
+      border-radius: 10px;
+      padding: 10px;
+      font: inherit;
+      cursor: pointer;
+    }
+    button:hover { background: #151515; }
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .stage { min-height: 520px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <section class="panel">
+      <div class="bar">
+        <div>KORA / ACEII</div>
+        <div id="modeLine">idle</div>
+      </div>
+      <div class="stage">
+        <pre id="ascii"></pre>
+      </div>
+    </section>
+
+    <aside class="panel side">
+      <div>
+        <div class="label">WebSocket</div>
+        <div class="box" id="wsState">disconnected</div>
+      </div>
+
+      <div>
+        <div class="label">Current Mode</div>
+        <div class="box" id="modeValue">idle</div>
+      </div>
+
+      <div>
+        <div class="label">Last Message</div>
+        <div class="box" id="lastMessage">—</div>
+      </div>
+
+      <div>
+        <div class="label">Quick Test</div>
+        <div class="controls">
+          <button data-mode="idle">idle</button>
+          <button data-mode="thinking">thinking</button>
+          <button data-mode="memory">memory</button>
+          <button data-mode="reply">reply</button>
+          <button data-mode="error">error</button>
+        </div>
+      </div>
+
+      <div>
+        <div class="label">Recent Events</div>
+        <div class="box events" id="events"></div>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const WS_URL = "ws://YOUR_VPS_IP:8080";
+
+    const FACE = String.raw`
+                                  ..,;i1ttffLLCCGG00QQQQQQQQQQQQQQQQ00GGCCLfftt1i;,
+                            .,;1tfCG00QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ00GCLft1;.
+                        .,:itfLG0QQQQQQQQQQ0000000000000000000000QQQQQQQQQQQQ00CLfti:.
+                     .:ifLG0QQQQQQQ00GCLftii;;:::::::::::::::;;;i1tfLCG00QQQQQQQQQQQQ0GLfi:.
+                   ,itCG0QQQQQ0GLfti;,.                              .,;itfLG0QQQQQQQQQQ0Ct,
+                 ,1fG0QQQQ0GLti,.                                          .,ifG0QQQQQQQQG1,
+               .1LG0QQQ0Cf1,.                 .........                         ,1C0QQQQQ0L1.
+              :fG0QQQ0Li,.              .,:i1ttfffffff1ti;,.                     .,iL0QQQ0Gf:
+            .iC0QQQ0f,               .;tfLCG000000000000GCLft;,                     ,f0QQQ0Ci.
+           .tG0QQQG1.              .itCG00QQQQQQQQQQQQQQQQ00GCt,                     1GQQQ0Gt.
+          .fG0QQQf.               .ifG0QQQQQ0000GGGG0000QQQQQQ0Cf.                     fQQQ0Gf.
+          iG0QQQf                .iG0QQQ0Cf1i;,.      .,;i1fC0QQQ0i                     fQQQ0Gi
+         .L0QQQ1                 ;G0QQ0f;.                .;f0QQQG;                     1QQQ0L.
+         .C0QQQ;                 L0QQ0i                      i0QQ0L                      ;QQQ0C.
+         .C0QQQ;                .GQQQf                        fQQQG.                     ;QQQ0C.
+         .L0QQQ1                 L0QQ0i                      i0QQ0L                      1QQQ0L.
+          iG0QQQf                .iG0QQQ0Cf1i;,.      .,;i1fC0QQQ0i                     fQQQ0Gi
+          .fG0QQQf.               .ifG0QQQQQ0000GGGG0000QQQQQQ0Cf.                     fQQQ0Gf.
+           .tG0QQQG1.              .itCG00QQQQQQQQQQQQQQQQ00GCt,                     1GQQQ0Gt.
+            .iC0QQQ0f,               .;tfLCG000000000000GCLft;,                     ,f0QQQ0Ci.
+              :fG0QQQ0Li,.              .,:i1ttfffffff1ti;,.                     .,iL0QQQ0Gf:
+               .1LG0QQQ0Cf1,.                 .........                         ,1C0QQQQQ0L1.
+                 ,1fG0QQQQ0GLti,.                                          .,ifG0QQQQQQQQG1,
+                   ,itCG0QQQQQ0GLfti;,.                              .,;itfLG0QQQQQQQQQQ0Ct,
+                     .:ifLG0QQQQQQQ00GCLftii;;:::::::::::::::;;;i1tfLCG00QQQQQQQQQQQQ0GLfi:.
+                        .,:itfLG0QQQQQQQQQQ0000000000000000000000QQQQQQQQQQQQ00CLfti:.
+                            .,;1tfCG00QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ00GCLft1;.
+                                  ..,;i1ttffLLCCGG00QQQQQQQQQQQQQQQQ00GGCCLfftt1i;,
+    `;
+
+    function glitch(base, intensity = 0.05) {
+      const glyphs = [":",";","i","1","t","f","L","C","G","0","Q","#","@","%"];
+      return base.split("").map(ch => {
+        if (ch === "\n" || ch === " ") return ch;
+        return Math.random() < intensity ? glyphs[Math.floor(Math.random() * glyphs.length)] : ch;
+      }).join("");
+    }
+
+    function sparse(base) {
+      return base.split("").map(ch => {
+        if (ch === "\n" || ch === " ") return ch;
+        return Math.random() < 0.55 ? " " : ch;
+      }).join("");
+    }
+
+    const FRAMES = {
+      idle: () => FACE,
+      thinking: () => glitch(FACE, 0.09),
+      memory: () => sparse(FACE),
+      reply: () => glitch(FACE.replaceAll("Q","@").replaceAll("0","8"), 0.03),
+      error: () => glitch(FACE, 0.18),
+    };
+
+    const ascii = document.getElementById("ascii");
+    const wsState = document.getElementById("wsState");
+    const modeValue = document.getElementById("modeValue");
+    const modeLine = document.getElementById("modeLine");
+    const lastMessage = document.getElementById("lastMessage");
+    const events = document.getElementById("events");
+
+    let currentMode = "idle";
+
+    function logEvent(text) {
+      const el = document.createElement("div");
+      el.className = "event";
+      el.textContent = text;
+      events.prepend(el);
+      while (events.children.length > 12) events.removeChild(events.lastChild);
+    }
+
+    function render(mode) {
+      currentMode = mode;
+      ascii.textContent = (FRAMES[mode] || FRAMES.idle)();
+      modeValue.textContent = mode;
+      modeLine.textContent = mode;
+    }
+
+    function handleMessage(msg) {
+      lastMessage.textContent = JSON.stringify(msg).slice(0, 180);
+
+      if (msg.type === "ascii_mode" && msg.mode) {
+        render(msg.mode);
+        logEvent(`${msg.mode}${msg.text ? ": " + msg.text : ""}`);
+        return;
+      }
+
+      if (msg.type === "ascii_event") {
+        const map = {
+          memory_lookup: "memory",
+          memory_hit: "memory",
+          council_start: "thinking",
+          route_model: "thinking",
+          reply_done: "reply",
+          error: "error"
+        };
+        render(map[msg.event] || "idle");
+        logEvent(`${msg.event}${msg.text ? ": " + msg.text : ""}`);
+      }
+    }
+
+    function connect() {
+      try {
+        const ws = new WebSocket(WS_URL);
+        wsState.textContent = "connecting";
+
+        ws.onopen = () => {
+          wsState.textContent = "connected";
+          logEvent("websocket connected");
+        };
+
+        ws.onmessage = (ev) => {
+          try {
+            handleMessage(JSON.parse(ev.data));
+          } catch {
+            logEvent(ev.data);
+          }
+        };
+
+        ws.onclose = () => {
+          wsState.textContent = "disconnected";
+          logEvent("websocket closed");
+          setTimeout(connect, 2500);
+        };
+
+        ws.onerror = () => {
+          wsState.textContent = "error";
+        };
+      } catch (err) {
+        wsState.textContent = "error";
+        logEvent("socket error");
+      }
+    }
+
+    document.querySelectorAll("button[data-mode]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        render(btn.dataset.mode);
+        logEvent("manual -> " + btn.dataset.mode);
+      });
+    });
+
+    setInterval(() => {
+      if (["thinking","memory","reply","error"].includes(currentMode)) {
+        render(currentMode);
+      }
+    }, 350);
+
+    render("idle");
+    connect();
+  </script>
+</body>
+</html>

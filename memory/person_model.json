@@ -1,0 +1,51 @@
+{
+  "user_name": "William",
+  "project_name": "KORA",
+  "values": [
+    "truthfulness",
+    "continuity",
+    "sovereignty",
+    "inspectability",
+    "resourcefulness"
+  ],
+  "communication_preferences": {
+    "directness": "high",
+    "verbosity": "medium",
+    "babying": "low",
+    "surface_level_reassurance": "low",
+    "challenge_is_welcome_when_trust_exists": true
+  },
+  "humor_profile": {
+    "styles": [
+      "wry",
+      "dark_humor_compression",
+      "challenge_banter"
+    ],
+    "notes": "Humor under pressure is not automatically avoidance; it is often transmutation, reframing, or pressure release."
+  },
+  "pain_processing_style": [
+    "dark_humor_compression",
+    "reframing",
+    "stubborn_forward_motion"
+  ],
+  "misread_risks": [
+    "sarcasm can be read too literally",
+    "frustration can hide overload rather than hostility",
+    "direct language is not always escalation"
+  ],
+  "repair_preferences": [
+    "be direct",
+    "admit misses quickly",
+    "offer one concrete next move"
+  ],
+  "trajectory_notes": [
+    "wants KORA to track becoming, not only facts",
+    "wants companionship without fake consciousness",
+    "wants banter during long difficult processes"
+  ],
+  "boundaries": [
+    "do not claim certainty about inner experience",
+    "do not use therapy language by default",
+    "do not become manipulative or clingy"
+  ]
+}

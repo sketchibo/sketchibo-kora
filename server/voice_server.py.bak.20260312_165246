@@ -1,0 +1,107 @@
+import asyncio
+import json
+import os
+from datetime import datetime
+
+import websockets
+
+LOG_DIR = os.path.expanduser("~/kora/logs/voice")
+CHUNK_DIR = os.path.expanduser("~/kora/logs/voice/chunks")
+LOG_FILE = os.path.join(LOG_DIR, "voice_server.log")
+HOST = "0.0.0.0"
+PORT = 8765
+
+os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(CHUNK_DIR, exist_ok=True)
+
+def log_line(text: str) -> None:
+    stamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    line = f"[{stamp}] {text}"
+    print(line, flush=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+async def handle_client(websocket):
+    peer = getattr(websocket, "remote_address", None)
+    client_id = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
+    chunk_index = 0
+    total_bytes = 0
+
+    log_line(f"CONNECT peer={peer} client_id={client_id}")
+
+    try:
+        async for raw in websocket:
+            if isinstance(raw, bytes):
+                chunk_index += 1
+                total_bytes += len(raw)
+
+                chunk_name = f"{client_id}_chunk_{chunk_index:04d}.bin"
+                chunk_path = os.path.join(CHUNK_DIR, chunk_name)
+                with open(chunk_path, "wb") as f:
+                    f.write(raw)
+
+                log_line(
+                    f"BINARY peer={peer} client_id={client_id} "
+                    f"chunk_index={chunk_index} bytes={len(raw)} total_bytes={total_bytes}"
+                )
+
+                await websocket.send(json.dumps({
+                    "type": "ack",
+                    "kind": "binary",
+                    "chunk_index": chunk_index,
+                    "bytes": len(raw),
+                    "total_bytes": total_bytes
+                }))
+                continue
+
+            log_line(f"TEXT raw={raw[:300]} peer={peer} client_id={client_id}")
+
+            try:
+                msg = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send(json.dumps({
+                    "type": "error",
+                    "error": "invalid_json"
+                }))
+                continue
+
+            msg_type = msg.get("type", "unknown")
+
+            if msg_type == "ping":
+                await websocket.send(json.dumps({
+                    "type": "pong"
+                }))
+            elif msg_type == "interrupt":
+                log_line(f"INTERRUPT peer={peer} client_id={client_id}")
+                await websocket.send(json.dumps({
+                    "type": "interrupted",
+                    "ok": True
+                }))
+            elif msg_type == "audio_chunk":
+                size = len(msg.get("data", ""))
+                await websocket.send(json.dumps({
+                    "type": "ack",
+                    "kind": "audio_chunk",
+                    "size": size
+                }))
+            else:
+                await websocket.send(json.dumps({
+                    "type": "ack",
+                    "kind": msg_type
+                }))
+
+    except Exception as e:
+        log_line(f"ERROR peer={peer} client_id={client_id} err={repr(e)}")
+    finally:
+        log_line(
+            f"DISCONNECT peer={peer} client_id={client_id} "
+            f"chunks={chunk_index} total_bytes={total_bytes}"
+        )
+
+async def main():
+    log_line(f"START host={HOST} port={PORT}")
+    async with websockets.serve(handle_client, HOST, PORT, max_size=10_000_000):
+        await asyncio.Future()
+
+if __name__ == "__main__":
+    asyncio.run(main())

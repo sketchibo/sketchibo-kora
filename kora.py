@@ -7,6 +7,9 @@ import subprocess
 from datetime import datetime
 from typing import Dict, Optional, Any
 from kora_interpreter import interpret
+from core.empathy.state_estimator import estimate_state
+from core.empathy.response_policy import decide_response_policy, render_empathy_block
+from core.empathy.input_classifier import classify_input
 
 import requests
 from dotenv import load_dotenv
@@ -80,6 +83,27 @@ def startup_context_text(ctx):
     lines.append("[/STARTUP CONTEXT]")
     return "\n".join(lines)
 
+
+def startup_context_brief(ctx):
+    if not ctx:
+        return ""
+
+    user = (ctx.get("user") or {}).get("name", "unknown")
+    project = (ctx.get("project") or {}).get("name", "unknown")
+    principles = ctx.get("pinned_principles") or []
+
+    lines = [
+        "[STARTUP BRIEF]",
+        f"User: {user}",
+        f"Project: {project}",
+    ]
+
+    if principles:
+        lines.append("Principles: " + "; ".join(principles[:3]))
+
+    lines.append("[/STARTUP BRIEF]")
+    return "\n".join(lines)
+
 def print_startup_context(ctx):
     block = startup_context_text(ctx)
     if block:
@@ -90,7 +114,65 @@ def print_startup_context(ctx):
 
 STARTUP_CONTEXT = load_startup_context()
 
-def ollama_generate(model: str, prompt: str, timeout: int = 60) -> str:
+
+PERSON_MODEL_PATH = os.path.join(BASE_DIR, "memory", "person_model.json")
+RAPPORT_STATE_PATH = os.path.join(BASE_DIR, "memory", "rapport_state.json")
+TRAJECTORY_PATH = os.path.join(BASE_DIR, "memory", "trajectory.json")
+SIGNALS_PATH = os.path.join(BASE_DIR, "memory", "signals.jsonl")
+
+def load_json_file(path: str, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return default
+    except Exception:
+        return default
+
+def load_person_model() -> Dict[str, Any]:
+    return load_json_file(PERSON_MODEL_PATH, {})
+
+def load_rapport_state() -> Dict[str, Any]:
+    return load_json_file(RAPPORT_STATE_PATH, {})
+
+def load_trajectory_state() -> Dict[str, Any]:
+    return load_json_file(TRAJECTORY_PATH, {})
+
+def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mode: str, trajectory_hint: str = "", classification: Dict[str, Any] | None = None) -> None:
+    os.makedirs(os.path.dirname(SIGNALS_PATH), exist_ok=True)
+    row = {
+        "ts": datetime.now().isoformat(),
+        "mode": mode,
+        "raw_input": user_text,
+        "trajectory_hint": trajectory_hint,
+        "state": state,
+        "policy": policy,
+        "classification": classification or {},
+    }
+    try:
+        with open(SIGNALS_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+def empathy_context_block(user_text: str, mode: str = "chat") -> str:
+    person_model = load_person_model()
+    rapport_state = load_rapport_state()
+    trajectory_state = load_trajectory_state()
+    classification = classify_input(user_text)
+
+    state = estimate_state(user_text, person_model=person_model, rapport=rapport_state)
+    policy = decide_response_policy(user_text, state, rapport=rapport_state, classification=classification)
+    block = render_empathy_block(state, policy, classification=classification)
+
+    trajectory_hint = str((trajectory_state or {}).get("current_arc", "")).strip()
+    if trajectory_hint:
+        block = block + "\nTrajectory hint: " + trajectory_hint
+
+    log_signal(user_text, state, policy, mode=mode, trajectory_hint=trajectory_hint, classification=classification)
+    return block
+
+def ollama_generate(model: str, prompt: str, timeout: int = 180) -> str:
     payload = {"model": model, "prompt": prompt, "stream": False}
     try:
         r = requests.post(OLLAMA_URL, json=payload, timeout=timeout)
@@ -610,22 +692,49 @@ def memory_view(kind: str = "all", fact_limit: int = 8, line_limit: int = 40) ->
 
 
 def run_fast(user_prompt: str) -> str:
-    context = load_canon_files().strip()
-    full_prompt = f"{context}\n\n## User Request\n{user_prompt}" if context else user_prompt
+    empathy_block = empathy_context_block(user_prompt, mode="fast")
+    startup_brief = startup_context_brief(STARTUP_CONTEXT)
 
-    v = venice_chat(full_prompt, timeout=20)
-    if v:
-        return v
-    startup_block = startup_context_text(STARTUP_CONTEXT)
-    if startup_block:
-        full_prompt = startup_block + "\n\n" + full_prompt
+    style_block = (
+        "[FAST MODE STYLE]\n"
+        "You are KORA.\n"
+        "Reply like a grounded, direct, slightly wry builder-companion.\n"
+        "Do not sound like customer support, therapy, or email.\n"
+        "Do not say things like 'How can I assist you today', 'I understand', or 'Could you provide details' unless truly necessary.\n"
+        "Use the Input mode from INTERACTION READ.\n"
+        "If Input mode is shell_blob: treat it as shell/log text and summarize, debug, or extract actions.\n"
+        "If Input mode is task_debug: prioritize concrete troubleshooting over reassurance.\n"
+        "If Input mode is voice_identity: stay at the level of voice, presence, identity, and meaning first; do not jump straight to implementation.\n"
+        "If Input mode is meta_system_talk: discuss KORA/Lyra/system behavior plainly.\n"
+        "If Input mode is rapport_banter: light playfulness is fine.\n"
+        "Do not default back to active goals or boot tasks unless the user is asking about them.\n"
+        "Answer the actual sentence in front of you.\n"
+        "Keep it natural, concise, and human-readable.\n"
+        "Do not wrap the answer in labels like 'Response:' or 'KORA's Response:'.\n"
+        "[/FAST MODE STYLE]"
+    )
+
+    parts = []
+    if startup_brief:
+        parts.append(startup_brief)
+    parts.append(style_block)
+    if empathy_block:
+        parts.append(empathy_block)
+    parts.append("## User Request\n" + user_prompt)
+
+    full_prompt = "\n\n".join(parts)
     return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
+
 
 
 def run_council(user_prompt: str) -> str:
     facts = facts_preview(limit=5)
     state = self_reflect()
     context = load_canon_files().strip()
+    empathy_block = empathy_context_block(user_prompt, mode="council")
+
+    if len(context) > 5000:
+        context = context[:5000] + "\n...[trimmed for council mode]"
 
     council_prompt = (
         "You are KORA. Answer like a builder, not a manager.\n\n"
@@ -633,6 +742,8 @@ def run_council(user_prompt: str) -> str:
         f"{context}\n\n"
         "CURRENT STATE:\n"
         f"{state}\n\n"
+        "INTERACTION READ:\n"
+        f"{empathy_block}\n\n"
         "PINNED FACTS:\n"
         f"{facts}\n\n"
         "USER REQUEST:\n"
@@ -644,7 +755,10 @@ def run_council(user_prompt: str) -> str:
     startup_block = startup_context_text(STARTUP_CONTEXT)
     if startup_block:
         council_prompt = startup_block + "\n\n" + council_prompt
+
     return ollama_generate("qwen2.5:7b", council_prompt, timeout=60)
+
+
 
 def handle_cli() -> bool:
     if len(sys.argv) <= 1:

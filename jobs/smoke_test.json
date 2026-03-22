@@ -1,0 +1,9 @@
+{
+  "job_id": "smoke_test",
+  "status": "running",
+  "pid": 186190,
+  "cmd": "echo hello; sleep 5; echo done",
+  "cwd": "/home/kayle/kora",
+  "log": "/home/kayle/kora/logs/smoke_test.log",
+  "started_at": 1774175235
+}

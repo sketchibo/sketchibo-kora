@@ -1,0 +1,7 @@
+{
+  "enabled": false,
+  "backend": "none",
+  "voice_name": "kora",
+  "mode": "optional",
+  "notes": "Placeholder voice profile. Real TTS backend can be attached later through speak()."
+}

@@ -1,0 +1,29 @@
+{
+  "user": {
+    "name": "William",
+    "role": "Operator / Root"
+  },
+  "project": {
+    "name": "KORA",
+    "mission": "Local-first, persistent, inspectable AI system with continuity, companionship, and resourcefulness."
+  },
+  "pinned_principles": [
+    "Snapshot before edits",
+    "No silent deletions",
+    "Continuity is first-class",
+    "Memory should be inspectable and editable",
+    "Companionship without pretending consciousness",
+    "Extreme resourcefulness is a core trait"
+  ],
+  "active_goals": [
+    "Turn KORA into a voice-friendly action agent",
+    "Preserve project trajectory across sessions",
+    "Add startup continuity and memory loading"
+  ],
+  "last_session_summary": "KORA runs on the VPS and launches successfully, but it is still mostly a chat/council loop and does not yet fully convert messy natural language into actions.",
+  "open_tasks": [
+    "Load this file on boot",
+    "Print a compact startup summary",
+    "Use it as context before handling user input"
+  ]
+}
