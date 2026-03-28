@@ -1,0 +1,1 @@
+Connection error: no Ollama reachable.

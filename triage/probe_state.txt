@@ -1,0 +1,38 @@
+
+[STARTUP CONTEXT]
+User: William
+Project: KORA
+Principles: Snapshot before edits; No silent deletions; Continuity is first-class; Memory should be inspectable and editable
+Active goal: Turn KORA into a voice-friendly action agent
+Open task: Load this file on boot
+[/STARTUP CONTEXT]
+
+Hey there! Welcome to KORA Council!
+Commands: help, test, gtest, fast, council, status, selfcheck, remember, memory, exit
+
+You: 
+KORA: OK (mode=council)
+
+You: 
+KORA: VERIFIED:
+- startup_context.json exists
+- guidance.md exists
+- signals.jsonl exists
+- facts.jsonl exists
+- latest signal timestamp: 2026-03-24T04:39:26.949033
+- latest snapshot file: snapshots/snapshot_20260320_214356.json
+- Ollama API reachable
+
+INFERRED:
+- memory/signals pipeline has written at least one entry
+- snapshot workflow has been used recently
+- local model backend is available for KORA
+
+UNKNOWN:
+- whether KORA chat tone will stay distinct across turns without a code-level mode flag
+- whether generic council fallback has been fully bypassed for all status-style prompts
+
+NEXT MOVE:
+- patch any remaining generic fallback paths if a status question still drifts into chat
+
+You: 

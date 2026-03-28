@@ -1,0 +1,25 @@
+## main...origin/main [ahead 1]
+ M .env
+ M crypto/cron.log
+ M crypto/moonshot_alerts.log
+ M crypto/moonshot_latest.json
+ M crypto/moonshot_state.json
+ M kora.py
+ M kora_interpreter.py
+ M kora_tools.py
+ M memory/signals.jsonl
+?? .env.bak_now
+?? abc.txt
+?? boot_kora.sh
+?? handoff/
+?? kora.py.bak_20260325_003926
+?? kora.py.bak_actionrouter_20260325_011950
+?? kora.py.bak_loopfix_20260325_005407
+?? kora_interpreter.py.bak_20260325_003926
+?? kora_probe.py
+?? kora_tools.py.bak_20260325_003926
+?? test.py
+?? triage/ground_truth.txt
+?? triage/probe_evidence.txt
+?? triage/probe_state.txt
+?? triage/selfcheck.txt

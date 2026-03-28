@@ -1,0 +1,14 @@
+=== FILES ===
+-rw-rw-r-- 1 kayle kayle    391 Mar 13 11:52 memory/facts.jsonl
+-rw-rw-r-- 1 kayle kayle    355 Mar 13 11:52 memory/guidance.md
+-rw-rw-r-- 1 kayle kayle 207348 Mar 24 04:39 memory/signals.jsonl
+-rw-rw-r-- 1 kayle kayle   1005 Mar 18 08:15 memory/startup_context.json
+
+=== LATEST SIGNAL ===
+{"ts": "2026-03-24T04:39:26.949033", "mode": "fast", "raw_input": "- local model backend is available for KORA", "trajectory_hint": "Building KORA into a continuity-rich, trajectory-aware companion system that can stay present through long difficult processes without faking consciousness.", "state": {"valence": "neutral", "intensity": 0.029, "energy": "medium", "stance": "direct", "humor_mode": "none", "sarcasm_prob": 0.0, "frustration_prob": 0.0, "overwhelm_prob": 0.0, "shame_prob": 0.0, "vulnerability": 0.0, "task_friction": 0.0, "need": "answer", "banter_window_open": false, "notes": []}, "policy": {"input_mode": "meta_system_talk", "response_mode": "warm_direct", "banter_allowed": false, "banter_style": "none", "challenge_level": 0.55, "companionship_level": 0.4, "do_not_psychologize": true, "trust_level": 0.68, "playfulness_budget": 0.62, "anthropomorphic_translation_ok": true}, "classification": {"mode": "meta_system_talk", "confidence": 0.47, "scores": {"shell_blob": 0, "task_debug": 0, "voice_identity": 0, "meta_system_talk": 1, "rapport_banter": 0}, "notes": ["This is about KORA/Lyra/system behavior."]}}
+
+=== LATEST SNAPSHOT ===
+snapshots/snapshot_20260320_214356.json
+
+=== OLLAMA ===
+reachable
