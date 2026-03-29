@@ -21,3 +21,5 @@ server/*.bak.*
 .env
 .venv/
 venv/
+
+*.bak*
