@@ -803,6 +803,12 @@ def handle_cli() -> bool:
         print(memory_view(kind))
         return True
 
+
+    if arg == "pulse":
+        from kora_pulse import run_pulse
+        print(run_pulse(verbose=True))
+        return True
+
     return False
 
 
@@ -907,6 +913,13 @@ def main():
         if ul == "selfcheck":
             print("\nKORA:\n" + selfcheck())
             continue
+
+        if ul in ("pulse", "/pulse"):
+            from kora_pulse import run_pulse
+            print("\nKORA: Running pulse...")
+            print("\nKORA:\n" + run_pulse(verbose=False))
+            continue
+
 
         if ul.startswith("/remember "):
             rest = u[len("/remember "):].strip()
