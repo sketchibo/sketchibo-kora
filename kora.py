@@ -1,4 +1,13 @@
 import kora_tools
+try:
+    from kora_confinement import get_tier, log_confinement_event
+except Exception:
+    def get_tier():
+        return 0
+
+    def log_confinement_event(*args, **kwargs):
+        return None
+
 import os
 import sys
 import json
@@ -812,6 +821,50 @@ def handle_cli() -> bool:
     return False
 
 
+ACTION_TIER_REQUIREMENTS = {
+    'get_system_status': 0,
+    'list_files': 0,
+    'read_file': 0,
+    'view_memory': 0,
+    'remember_append': 1,
+    'run_shell': 3,
+    'write_file': 4,
+    'patch_file': 4,
+}
+
+def _kscp_log(message: str) -> None:
+    try:
+        log_confinement_event(message)
+        return
+    except TypeError:
+        try:
+            log_confinement_event('kora.py', message)
+            return
+        except Exception:
+            return
+    except Exception:
+        return
+
+def confinement_check(intent_name: str, args=None):
+    required = ACTION_TIER_REQUIREMENTS.get(intent_name, 4)
+    try:
+        current = int(get_tier())
+    except Exception:
+        current = 0
+
+    if current < required:
+        msg = f'K-SCP: blocked {intent_name} (tier {current} < required {required})'
+        _kscp_log(msg)
+        return False, msg
+
+    return True, ''
+
+def guarded_remember(kind: str, text: str) -> str:
+    ok, deny = confinement_check('remember_append', {'kind': kind, 'text': text})
+    if not ok:
+        return deny
+    return remember(kind, text)
+
 def main():
     print_startup_context(STARTUP_CONTEXT)
     if handle_cli():
@@ -836,6 +889,11 @@ def main():
             if pending_action:
                 if pending_action["intent"] == "patch_file":
                     args = pending_action["args"]
+                    ok, deny = confinement_check("patch_file", args)
+                    if not ok:
+                        print(f"\nKORA: {deny}")
+                        pending_action = None
+                        continue
                     print("\nKORA:", kora_tools.patch_file(args["path"], args["instruction"]))
                     pending_action = None
                     continue
@@ -851,9 +909,13 @@ def main():
             continue
 
         intent = interpret(u)
-        if intent["mode"] == "action":
+        if intent["mode"] == "action" and intent.get("confidence", 0) >= 0.85:
             i = intent["intent"]
             args = intent["args"]
+            ok, deny = confinement_check(i, args)
+            if not ok:
+                print(f"\nKORA: {deny}")
+                continue
 
             if i == "run_shell":
                 print("\nKORA:", kora_tools.run_shell(args["command"]))
@@ -927,12 +989,12 @@ def main():
                 print("\nKORA: Usage -> /remember fact: ...  |  /remember guidance: ...")
                 continue
             kind, text = rest.split(":", 1)
-            print("\nKORA:", remember(kind.strip(), text.strip()))
+            print("\nKORA:", guarded_remember(kind.strip(), text.strip()))
             continue
 
         if ul.startswith("/journal:"):
             text = u.split(":", 1)[1].strip()
-            print("\nKORA:", remember("journal", text))
+            print("\nKORA:", guarded_remember("journal", text))
             continue
 
         if ul == "/memory" or ul == "memory":
