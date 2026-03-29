@@ -1,3 +1,7 @@
 {"ts":"2026-03-13T00:00:00","kind":"fact","text":"William is building KORA as a local-first AI system with continuity, inspectability, and real memory as first-class features."}
 {"ts": "2026-03-13T11:51:31.077956", "kind": "fact", "text": "KORA now has a manual memory write path."}
 {"ts": "2026-03-13T11:52:15.863200", "kind": "fact", "text": "William wants continuity to be first-class."}
+{"ts": "2026-03-29T09:26:44.045209", "kind": "fact", "source": "claude_note", "text": "Claude-Kora bridge deployed. write-back working."}
+{"ts": "2026-03-29T09:28:51.300627", "kind": "fact", "source": "claude_note", "text": "Decision: startup_context is canonical boot continuity. facts.jsonl is durable fact memory. ledger.jsonl is raw append-only history."}
+{"ts": "2026-03-29T09:29:26.945409", "kind": "fact", "source": "claude_note", "text": "Decision: Claude-KORA bridge is live. Claude can now write notes and handoffs into KORA's inspectable memory. Context pull is working."}
+{"ts": "2026-03-29T09:35:02.821719", "kind": "fact", "source": "claude_note", "text": "Claude-Kora bridge deployed"}
