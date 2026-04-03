@@ -1,13 +1,3 @@
-import kora_tools
-try:
-    from kora_confinement import get_tier, log_confinement_event
-except Exception:
-    def get_tier():
-        return 0
-
-    def log_confinement_event(*args, **kwargs):
-        return None
-
 import os
 import sys
 import json
@@ -17,10 +7,8 @@ import subprocess
 from datetime import datetime
 from typing import Dict, Optional, Any
 from kora_interpreter import interpret
-import kora_tools
 from core.empathy.state_estimator import estimate_state
 from core.empathy.response_policy import decide_response_policy, render_empathy_block
-from core.empathy.input_classifier import classify_input
 
 import requests
 from dotenv import load_dotenv
@@ -33,24 +21,17 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
 VENICE_MODEL = "venice-uncensored"
 GEMINI_MODEL = "gemini-2.5-flash"
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-QWEN_MODEL = "qwen/qwen-2.5-72b-instruct"
-QWEN_THINK_MODEL = "qwen/qwq-32b"
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
 
-FAST_LOCAL_MODELS = ["tinyllama"]
-COUNCIL_LOCAL_MODELS = ["tinyllama", "dolphin-phi:latest"]
+FAST_LOCAL_MODELS = ["qwen2.5:7b"]
+COUNCIL_LOCAL_MODELS = ["qwen2.5:7b", "dolphin-phi:latest", "llama3.1:8b"]
 
 
 def env_key() -> str:
     return os.getenv("VENICE_API_KEY", "").strip()
-
-
-def openrouter_key() -> str:
-    return os.getenv("OPENROUTER_API_KEY", "").strip()
 
 
 def gemini_key() -> str:
@@ -101,27 +82,6 @@ def startup_context_text(ctx):
     lines.append("[/STARTUP CONTEXT]")
     return "\n".join(lines)
 
-
-def startup_context_brief(ctx):
-    if not ctx:
-        return ""
-
-    user = (ctx.get("user") or {}).get("name", "unknown")
-    project = (ctx.get("project") or {}).get("name", "unknown")
-    principles = ctx.get("pinned_principles") or []
-
-    lines = [
-        "[STARTUP BRIEF]",
-        f"User: {user}",
-        f"Project: {project}",
-    ]
-
-    if principles:
-        lines.append("Principles: " + "; ".join(principles[:3]))
-
-    lines.append("[/STARTUP BRIEF]")
-    return "\n".join(lines)
-
 def print_startup_context(ctx):
     block = startup_context_text(ctx)
     if block:
@@ -156,7 +116,7 @@ def load_rapport_state() -> Dict[str, Any]:
 def load_trajectory_state() -> Dict[str, Any]:
     return load_json_file(TRAJECTORY_PATH, {})
 
-def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mode: str, trajectory_hint: str = "", classification: Dict[str, Any] | None = None) -> None:
+def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mode: str, trajectory_hint: str = "") -> None:
     os.makedirs(os.path.dirname(SIGNALS_PATH), exist_ok=True)
     row = {
         "ts": datetime.now().isoformat(),
@@ -165,7 +125,6 @@ def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mo
         "trajectory_hint": trajectory_hint,
         "state": state,
         "policy": policy,
-        "classification": classification or {},
     }
     try:
         with open(SIGNALS_PATH, "a", encoding="utf-8") as f:
@@ -177,17 +136,16 @@ def empathy_context_block(user_text: str, mode: str = "chat") -> str:
     person_model = load_person_model()
     rapport_state = load_rapport_state()
     trajectory_state = load_trajectory_state()
-    classification = classify_input(user_text)
 
     state = estimate_state(user_text, person_model=person_model, rapport=rapport_state)
-    policy = decide_response_policy(user_text, state, rapport=rapport_state, classification=classification)
-    block = render_empathy_block(state, policy, classification=classification)
+    policy = decide_response_policy(user_text, state, rapport=rapport_state)
+    block = render_empathy_block(state, policy)
 
     trajectory_hint = str((trajectory_state or {}).get("current_arc", "")).strip()
     if trajectory_hint:
         block = block + "\nTrajectory hint: " + trajectory_hint
 
-    log_signal(user_text, state, policy, mode=mode, trajectory_hint=trajectory_hint, classification=classification)
+    log_signal(user_text, state, policy, mode=mode, trajectory_hint=trajectory_hint)
     return block
 
 def ollama_generate(model: str, prompt: str, timeout: int = 180) -> str:
@@ -270,43 +228,6 @@ def venice_test() -> str:
             continue
 
     return last
-
-
-def openrouter_chat(prompt: str, timeout: int = 30, model_override: str = None) -> Optional[str]:
-    key = openrouter_key()
-    if not key:
-        return None
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://kora.local",
-        "X-Title": "Kora",
-    }
-    payload = {
-        "model": model_override or QWEN_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.7,
-    }
-    try:
-        r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
-        r.raise_for_status()
-        data = r.json()
-        choices = data.get("choices") or []
-        if choices:
-            msg = choices[0].get("message") or {}
-            content = msg.get("content")
-            if isinstance(content, str) and content.strip():
-                return content.strip()
-        return None
-    except Exception:
-        return None
-
-
-def openrouter_test() -> str:
-    out = openrouter_chat("Reply with exactly QWEN_OK", timeout=20)
-    if out and "QWEN_OK" in out:
-        return f"openrouter/qwen OK"
-    return f"openrouter/qwen FAIL: {out!r}"
 
 
 def gemini_generate(prompt: str, timeout: int = 30) -> str:
@@ -405,15 +326,6 @@ def load_canon_files() -> str:
         "core/profiles/persona_profile.md",
     ]
 
-    # Load K-SCP and LEX from scripts/ if present
-    for extra in ["../scripts/K-SCP.md", "../scripts/LEX.md"]:
-        full = os.path.join(BASE_DIR, extra)
-        if os.path.exists(full):
-            with open(full, "r", encoding="utf-8") as f:
-                text = f.read().strip()
-                if text:
-                    chunks.append(f"## {os.path.basename(extra)}\n{text}")
-
     for file_path in canon_files:
         full = os.path.join(BASE_DIR, file_path)
         if os.path.exists(full):
@@ -481,9 +393,8 @@ def speak(text: str) -> str:
     backend = str(profile.get("backend", "none")).strip().lower()
     if backend in ("", "none", "off", "disabled"):
         return ""
-    import subprocess
-    subprocess.Popen(["bash", os.path.expanduser("~/scripts/speak.sh"), text])
-    return text
+    # Placeholder hook: real TTS backend can be attached later.
+    return ""
 
 
 def post_filter(text: str) -> str:
@@ -637,7 +548,6 @@ def selfcheck() -> str:
     report.append(f"cwd: {BASE_DIR}")
     report.append(f"venice_key: {'YES' if env_key() else 'NO'}")
     report.append(f"gemini_key: {'YES' if gemini_key() else 'NO'}")
-    report.append(f"openrouter_key: {'YES' if openrouter_key() else 'NO'}")
     report.append(f"kora.py: {'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora.py')) else 'NO'}")
     report.append(
         f"kora_interpreter.py: "
@@ -649,7 +559,6 @@ def selfcheck() -> str:
     )
     report.append(f"venice_test: {venice_test()}")
     report.append(f"gemini_test: {gemini_test()}")
-    report.append(f"openrouter_test: {openrouter_test()}")
     report.append("ollama_list:")
     report.append(safe_cmd("ollama list"))
     return "\n".join(report)
@@ -758,42 +667,33 @@ def memory_view(kind: str = "all", fact_limit: int = 8, line_limit: int = 40) ->
     return "\n\n".join(chunks).strip() or "MEMORY_EMPTY"
 
 
-def run_fast(user_prompt: str, model_override: str = None) -> str:
+def run_fast(user_prompt: str) -> str:
+    context = load_canon_files().strip()
     empathy_block = empathy_context_block(user_prompt, mode="fast")
-    startup_brief = startup_context_brief(STARTUP_CONTEXT)
 
-    style_block = (
-        "[FAST MODE STYLE]\n"
-        "You are KORA.\n"
-        "Reply like a grounded, direct, slightly wry builder-companion.\n"
-        "Do not sound like customer support, therapy, or email.\n"
-        "Do not say things like 'How can I assist you today', 'I understand', or 'Could you provide details' unless truly necessary.\n"
-        "Use the Input mode from INTERACTION READ.\n"
-        "If Input mode is shell_blob: treat it as shell/log text and summarize, debug, or extract actions.\n"
-        "If Input mode is task_debug: prioritize concrete troubleshooting over reassurance.\n"
-        "If Input mode is voice_identity: stay at the level of voice, presence, identity, and meaning first; do not jump straight to implementation.\n"
-        "If Input mode is meta_system_talk: discuss KORA/Lyra/system behavior plainly.\n"
-        "If Input mode is rapport_banter: light playfulness is fine.\n"
-        "Do not default back to active goals or boot tasks unless the user is asking about them.\n"
-        "Answer the actual sentence in front of you.\n"
-        "Keep it natural, concise, and human-readable.\n"
-        "Do not wrap the answer in labels like 'Response:' or 'KORA's Response:'.\n"
-        "[/FAST MODE STYLE]"
-    )
+    if len(context) > 2200:
+        context = context[:2200] + "
+...[trimmed for fast mode]"
 
     parts = []
-    if startup_brief:
-        parts.append(startup_brief)
-    parts.append(style_block)
+    if context:
+        parts.append(context)
     if empathy_block:
         parts.append(empathy_block)
-    parts.append("## User Request\n" + user_prompt)
+    parts.append("## User Request
+" + user_prompt)
 
-    full_prompt = "\n\n".join(parts)
-    out = openrouter_chat(full_prompt, timeout=90 if model_override else 45, model_override=model_override)
-    if out:
-        return out
-    return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
+    full_prompt = "
+
+".join(parts)
+
+    startup_block = startup_context_text(STARTUP_CONTEXT)
+    if startup_block:
+        full_prompt = startup_block + "
+
+" + full_prompt
+
+    return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=45)
 
 
 
@@ -804,29 +704,54 @@ def run_council(user_prompt: str) -> str:
     empathy_block = empathy_context_block(user_prompt, mode="council")
 
     if len(context) > 5000:
-        context = context[:5000] + "\n...[trimmed for council mode]"
+        context = context[:5000] + "
+...[trimmed for council mode]"
 
     council_prompt = (
-        "You are KORA. Answer like a builder, not a manager.\n\n"
-        "PROFILE CONTEXT:\n"
-        f"{context}\n\n"
-        "CURRENT STATE:\n"
-        f"{state}\n\n"
-        "INTERACTION READ:\n"
-        f"{empathy_block}\n\n"
-        "PINNED FACTS:\n"
-        f"{facts}\n\n"
-        "USER REQUEST:\n"
-        f"{user_prompt}\n\n"
-        "Use these headings exactly:\n"
-        "Healthy\nFragile\nMissing\nNext Move\n"
+        "You are KORA. Answer like a builder, not a manager.
+
+"
+        "PROFILE CONTEXT:
+"
+        f"{context}
+
+"
+        "CURRENT STATE:
+"
+        f"{state}
+
+"
+        "INTERACTION READ:
+"
+        f"{empathy_block}
+
+"
+        "PINNED FACTS:
+"
+        f"{facts}
+
+"
+        "USER REQUEST:
+"
+        f"{user_prompt}
+
+"
+        "Use these headings exactly:
+"
+        "Healthy
+Fragile
+Missing
+Next Move
+"
     )
 
     startup_block = startup_context_text(STARTUP_CONTEXT)
     if startup_block:
-        council_prompt = startup_block + "\n\n" + council_prompt
+        council_prompt = startup_block + "
 
-    return ollama_generate("tinyllama", council_prompt, timeout=60)
+" + council_prompt
+
+    return ollama_generate("qwen2.5:7b", council_prompt, timeout=60)
 
 
 
@@ -871,87 +796,33 @@ def handle_cli() -> bool:
         print(memory_view(kind))
         return True
 
-
-    if arg == "pulse":
-        from kora_pulse import run_pulse
-        print(run_pulse(verbose=True))
-        return True
-
     return False
 
+def handle_action(action, mode: str) -> str:
+    intent = (action or {}).get("intent", "")
+    args = (action or {}).get("args", {}) or {}
 
-ACTION_TIER_REQUIREMENTS = {
-    'get_system_status': 0,
-    'list_files': 0,
-    'read_file': 0,
-    'view_memory': 0,
-    'remember_append': 1,
-    'run_shell': 3,
-    'write_file': 4,
-    'patch_file': 4,
-}
+    if intent == "get_system_status":
+        active = COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]
+        return (
+            f"Current mode: {mode}\n"
+            f"Active engines: {', '.join(active)}\n"
+            f"Python: {sys.version.split()[0]}\n"
+            f"CWD: {BASE_DIR}"
+        )
 
-def _kscp_log(message: str) -> None:
-    try:
-        log_confinement_event(message)
-        return
-    except TypeError:
-        try:
-            log_confinement_event('kora.py', message)
-            return
-        except Exception:
-            return
-    except Exception:
-        return
+    if intent == "run_shell":
+        cmd = (args.get("command") or "").strip()
+        if not cmd:
+            return "ACTION_ERROR: empty command"
+        out = safe_cmd(cmd)
+        return out if out.strip() else "OK"
 
-def confinement_check(intent_name: str, args=None):
-    required = ACTION_TIER_REQUIREMENTS.get(intent_name, 4)
-    try:
-        current = int(get_tier())
-    except Exception:
-        current = 0
-
-    if current < required:
-        msg = f'K-SCP: blocked {intent_name} (tier {current} < required {required})'
-        _kscp_log(msg)
-        return False, msg
-
-    return True, ''
-
-def guarded_remember(kind: str, text: str) -> str:
-    ok, deny = confinement_check('remember_append', {'kind': kind, 'text': text})
-    if not ok:
-        return deny
-    return remember(kind, text)
-
-def resume_brief() -> str:
-    """Return a readable summary of recent facts for --resume."""
-    path = os.path.join(BASE_DIR, "memory", "facts.jsonl")
-    if not os.path.exists(path):
-        return "No previous session found."
-    lines = []
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            entries = [json.loads(l) for l in f if l.strip()]
-        # last 5 claude_session facts
-        session_facts = [e for e in entries if e.get("source") == "claude_session"][-5:]
-        if not session_facts:
-            session_facts = entries[-5:]
-        lines = [f"[{e.get('ts','')[:10]}] {e.get('text','')[:120]}" for e in session_facts]
-    except Exception as ex:
-        return f"Resume error: {ex}"
-    return "\n".join(lines)
+    return f"ACTION_UNKNOWN: {intent}"
 
 
 def main():
-    # --resume flag
-    if "--resume" in sys.argv:
-        print_startup_context(STARTUP_CONTEXT)
-        print("\n[RESUME — last session context]")
-        print(resume_brief())
-        print("[/RESUME]\n")
-        sys.argv = [a for a in sys.argv if a != "--resume"]
-
+    print_startup_context(STARTUP_CONTEXT)
     if handle_cli():
         return
 
@@ -961,70 +832,12 @@ def main():
     mode = "fast"
     _system_prompt = load_canon_files()
 
-    pending_action = None
-
     while True:
         u = input("\nYou: ").strip()
         if not u:
             continue
 
         ul = u.lower()
-
-        if ul == "approve":
-            if pending_action:
-                if pending_action["intent"] == "patch_file":
-                    args = pending_action["args"]
-                    ok, deny = confinement_check("patch_file", args)
-                    if not ok:
-                        print(f"\nKORA: {deny}")
-                        pending_action = None
-                        continue
-                    print("\nKORA:", kora_tools.patch_file(args["path"], args["instruction"]))
-                    pending_action = None
-                    continue
-            print("\nKORA: No pending action.")
-            continue
-
-        if ul == "cancel":
-            if pending_action:
-                pending_action = None
-                print("\nKORA: Pending action cleared.")
-                continue
-            print("\nKORA: No pending action.")
-            continue
-
-        intent = interpret(u)
-        if intent["mode"] == "action" and intent.get("confidence", 0) >= 0.85:
-            i = intent["intent"]
-            args = intent["args"]
-            ok, deny = confinement_check(i, args)
-            if not ok:
-                print(f"\nKORA: {deny}")
-                continue
-
-            if i == "run_shell":
-                print("\nKORA:", kora_tools.run_shell(args["command"]))
-                continue
-
-            elif i == "write_file":
-                print("\nKORA:", kora_tools.write_file(args["path"], args["content"]))
-                continue
-
-            elif i == "read_file":
-                print("\nKORA:\n" + kora_tools.read_file(args["path"]))
-                continue
-
-            elif i == "patch_file":
-                pending_action = {
-                    "intent": "patch_file",
-                    "args": args
-                }
-                print("\nKORA: [PENDING ACTION]")
-                print(f"KORA: File: {args['path']}")
-                print(f"KORA: Instruction: {args['instruction']}")
-                print("KORA: Type APPROVE to run or CANCEL to drop.")
-                continue
-
 
         if ul in ("exit", "quit"):
             break
@@ -1041,18 +854,9 @@ def main():
             print("\nKORA:", gemini_test())
             continue
 
-        if ul in ("qtest", "qwen", "qwen-test"):
-            print("\nKORA:", openrouter_test())
-            continue
-
         if ul in ("fast", "f"):
             mode = "fast"
             print("\nKORA: OK (mode=fast)")
-            continue
-
-        if ul in ("think", "t", "reason"):
-            mode = "think"
-            print("\nKORA: OK (mode=think — QwQ reasoning)")
             continue
 
         if ul in ("council", "c", "/council"):
@@ -1064,27 +868,11 @@ def main():
             active = COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]
             print("\nKORA: Current mode:", mode)
             print("KORA: Active engines:", ", ".join(active))
-            try:
-                import json as _json
-                _cf = os.path.join(BASE_DIR, "memory", "confinement_state.json")
-                _cs = _json.load(open(_cf))
-                print(f"KORA: K-SCP tier: {_cs.get('tier')} ({_cs.get('tier_name','?')}) — granted by {_cs.get('granted_by','?')} at {_cs.get('granted_at','?')}")
-                if _cs.get('note'):
-                    print(f"KORA: Note: {_cs.get('note')}")
-            except Exception as _e:
-                print(f"KORA: K-SCP state unreadable: {_e}")
             continue
 
         if ul == "selfcheck":
             print("\nKORA:\n" + selfcheck())
             continue
-
-        if ul in ("pulse", "/pulse"):
-            from kora_pulse import run_pulse
-            print("\nKORA: Running pulse...")
-            print("\nKORA:\n" + run_pulse(verbose=False))
-            continue
-
 
         if ul.startswith("/remember "):
             rest = u[len("/remember "):].strip()
@@ -1092,12 +880,12 @@ def main():
                 print("\nKORA: Usage -> /remember fact: ...  |  /remember guidance: ...")
                 continue
             kind, text = rest.split(":", 1)
-            print("\nKORA:", guarded_remember(kind.strip(), text.strip()))
+            print("\nKORA:", remember(kind.strip(), text.strip()))
             continue
 
         if ul.startswith("/journal:"):
             text = u.split(":", 1)[1].strip()
-            print("\nKORA:", guarded_remember("journal", text))
+            print("\nKORA:", remember("journal", text))
             continue
 
         if ul == "/memory" or ul == "memory":
@@ -1131,6 +919,13 @@ def main():
             print("\nKORA:", post_filter(run_fast(query)))
             continue
 
+        action = interpret(u)
+        if action.get("mode") == "action":
+            action_out = handle_action(action, mode)
+            print("\nKORA:", action_out)
+            speak(action_out)
+            continue
+
         if looks_like_shell_or_log(u):
             print(
                 "\nKORA: That looks like shell or log text. "
@@ -1145,9 +940,7 @@ def main():
             )
             continue
 
-        if mode == "think":
-            out = run_fast(u, model_override=QWEN_THINK_MODEL)
-        elif mode == "fast":
+        if mode == "fast":
             out = run_fast(u)
         else:
             out = run_council(u)
