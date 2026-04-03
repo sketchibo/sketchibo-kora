@@ -790,9 +790,22 @@ def run_fast(user_prompt: str, model_override: str = None) -> str:
     parts.append("## User Request\n" + user_prompt)
 
     full_prompt = "\n\n".join(parts)
-    out = openrouter_chat(full_prompt, timeout=90 if model_override else 45, model_override=model_override)
+
+    if not model_override:
+        out = gemini_generate(full_prompt, timeout=45)
+        if out and not out.startswith("GEMINI_"):
+            return out
+
+        out = venice_chat(full_prompt, timeout=45)
+        if out:
+            return out
+
+        return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
+
+    out = openrouter_chat(full_prompt, timeout=90, model_override=model_override)
     if out:
         return out
+
     return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
 
 
@@ -826,6 +839,12 @@ def run_council(user_prompt: str) -> str:
     if startup_block:
         council_prompt = startup_block + "\n\n" + council_prompt
 
+    out = gemini_generate(council_prompt, timeout=60)
+    if out and not out.startswith("GEMINI_"):
+        return out
+    out = venice_chat(council_prompt, timeout=60)
+    if out:
+        return out
     return ollama_generate("tinyllama", council_prompt, timeout=60)
 
 
