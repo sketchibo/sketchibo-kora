@@ -1,25 +1,64 @@
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
+# Virtual envs — never track these
+.venv/
+.venv-piper/
+.venv-voice/
+venv/
+
+# Env / secrets
+.env
+.env.*
+*.tokens
+
+# Aider AI coding assistant
+.aider*
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/
+
+# Logs / temp / runtime
+*.log
+*.tmp
+tmp/
 logs/
 jobs/
 snapshots/
 video_runs/
-tmp/
+triage/
+*.wav
 
-voice/__pycache__/
-server/*.bak.*
-
+# Backups
+*.bak
+*.bak*
+*.old
+*.orig
+*.rej
 *.tar.gz
 *.bin
-*.log
 *.onnx
+
+# Runtime memory — live data, not for git
 *.jsonl
+memory/facts.jsonl
+memory/journal*
+memory/session*
+memory/signals.jsonl
+ledger.jsonl
 
-.env
-.venv/
-venv/
+# Generated / build artifacts
+*.db
+*.db-shm
+*.db-wal
 
-*.bak*
+# OS junk
+.DS_Store
+Thumbs.db
+
+# One-off files that snuck in
+abc.txt
+Connection
