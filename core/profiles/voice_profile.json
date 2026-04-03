@@ -1,6 +1,6 @@
 {
-  "enabled": false,
-  "backend": "none",
+  "enabled": true,
+  "backend": "termux",
   "voice_name": "kora",
   "mode": "optional",
   "notes": "Placeholder voice profile. Real TTS backend can be attached later through speak()."

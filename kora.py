@@ -33,17 +33,24 @@ OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
 VENICE_MODEL = "venice-uncensored"
 GEMINI_MODEL = "gemini-2.5-flash"
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+QWEN_MODEL = "qwen/qwen-2.5-72b-instruct"
+QWEN_THINK_MODEL = "qwen/qwq-32b"
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
 )
 
-FAST_LOCAL_MODELS = ["qwen2.5:7b"]
-COUNCIL_LOCAL_MODELS = ["qwen2.5:7b", "dolphin-phi:latest", "llama3.1:8b"]
+FAST_LOCAL_MODELS = ["tinyllama"]
+COUNCIL_LOCAL_MODELS = ["tinyllama", "dolphin-phi:latest"]
 
 
 def env_key() -> str:
     return os.getenv("VENICE_API_KEY", "").strip()
+
+
+def openrouter_key() -> str:
+    return os.getenv("OPENROUTER_API_KEY", "").strip()
 
 
 def gemini_key() -> str:
@@ -265,6 +272,43 @@ def venice_test() -> str:
     return last
 
 
+def openrouter_chat(prompt: str, timeout: int = 30, model_override: str = None) -> Optional[str]:
+    key = openrouter_key()
+    if not key:
+        return None
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://kora.local",
+        "X-Title": "Kora",
+    }
+    payload = {
+        "model": model_override or QWEN_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.7,
+    }
+    try:
+        r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+        choices = data.get("choices") or []
+        if choices:
+            msg = choices[0].get("message") or {}
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+        return None
+    except Exception:
+        return None
+
+
+def openrouter_test() -> str:
+    out = openrouter_chat("Reply with exactly QWEN_OK", timeout=20)
+    if out and "QWEN_OK" in out:
+        return f"openrouter/qwen OK"
+    return f"openrouter/qwen FAIL: {out!r}"
+
+
 def gemini_generate(prompt: str, timeout: int = 30) -> str:
     key = gemini_key()
     if not key:
@@ -361,6 +405,15 @@ def load_canon_files() -> str:
         "core/profiles/persona_profile.md",
     ]
 
+    # Load K-SCP and LEX from scripts/ if present
+    for extra in ["../scripts/K-SCP.md", "../scripts/LEX.md"]:
+        full = os.path.join(BASE_DIR, extra)
+        if os.path.exists(full):
+            with open(full, "r", encoding="utf-8") as f:
+                text = f.read().strip()
+                if text:
+                    chunks.append(f"## {os.path.basename(extra)}\n{text}")
+
     for file_path in canon_files:
         full = os.path.join(BASE_DIR, file_path)
         if os.path.exists(full):
@@ -428,8 +481,9 @@ def speak(text: str) -> str:
     backend = str(profile.get("backend", "none")).strip().lower()
     if backend in ("", "none", "off", "disabled"):
         return ""
-    # Placeholder hook: real TTS backend can be attached later.
-    return ""
+    import subprocess
+    subprocess.Popen(["bash", os.path.expanduser("~/scripts/speak.sh"), text])
+    return text
 
 
 def post_filter(text: str) -> str:
@@ -583,6 +637,7 @@ def selfcheck() -> str:
     report.append(f"cwd: {BASE_DIR}")
     report.append(f"venice_key: {'YES' if env_key() else 'NO'}")
     report.append(f"gemini_key: {'YES' if gemini_key() else 'NO'}")
+    report.append(f"openrouter_key: {'YES' if openrouter_key() else 'NO'}")
     report.append(f"kora.py: {'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora.py')) else 'NO'}")
     report.append(
         f"kora_interpreter.py: "
@@ -594,6 +649,7 @@ def selfcheck() -> str:
     )
     report.append(f"venice_test: {venice_test()}")
     report.append(f"gemini_test: {gemini_test()}")
+    report.append(f"openrouter_test: {openrouter_test()}")
     report.append("ollama_list:")
     report.append(safe_cmd("ollama list"))
     return "\n".join(report)
@@ -702,7 +758,7 @@ def memory_view(kind: str = "all", fact_limit: int = 8, line_limit: int = 40) ->
     return "\n\n".join(chunks).strip() or "MEMORY_EMPTY"
 
 
-def run_fast(user_prompt: str) -> str:
+def run_fast(user_prompt: str, model_override: str = None) -> str:
     empathy_block = empathy_context_block(user_prompt, mode="fast")
     startup_brief = startup_context_brief(STARTUP_CONTEXT)
 
@@ -734,6 +790,9 @@ def run_fast(user_prompt: str) -> str:
     parts.append("## User Request\n" + user_prompt)
 
     full_prompt = "\n\n".join(parts)
+    out = openrouter_chat(full_prompt, timeout=90 if model_override else 45, model_override=model_override)
+    if out:
+        return out
     return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
 
 
@@ -767,7 +826,7 @@ def run_council(user_prompt: str) -> str:
     if startup_block:
         council_prompt = startup_block + "\n\n" + council_prompt
 
-    return ollama_generate("qwen2.5:7b", council_prompt, timeout=60)
+    return ollama_generate("tinyllama", council_prompt, timeout=60)
 
 
 
@@ -865,8 +924,34 @@ def guarded_remember(kind: str, text: str) -> str:
         return deny
     return remember(kind, text)
 
+def resume_brief() -> str:
+    """Return a readable summary of recent facts for --resume."""
+    path = os.path.join(BASE_DIR, "memory", "facts.jsonl")
+    if not os.path.exists(path):
+        return "No previous session found."
+    lines = []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            entries = [json.loads(l) for l in f if l.strip()]
+        # last 5 claude_session facts
+        session_facts = [e for e in entries if e.get("source") == "claude_session"][-5:]
+        if not session_facts:
+            session_facts = entries[-5:]
+        lines = [f"[{e.get('ts','')[:10]}] {e.get('text','')[:120]}" for e in session_facts]
+    except Exception as ex:
+        return f"Resume error: {ex}"
+    return "\n".join(lines)
+
+
 def main():
-    print_startup_context(STARTUP_CONTEXT)
+    # --resume flag
+    if "--resume" in sys.argv:
+        print_startup_context(STARTUP_CONTEXT)
+        print("\n[RESUME — last session context]")
+        print(resume_brief())
+        print("[/RESUME]\n")
+        sys.argv = [a for a in sys.argv if a != "--resume"]
+
     if handle_cli():
         return
 
@@ -956,9 +1041,18 @@ def main():
             print("\nKORA:", gemini_test())
             continue
 
+        if ul in ("qtest", "qwen", "qwen-test"):
+            print("\nKORA:", openrouter_test())
+            continue
+
         if ul in ("fast", "f"):
             mode = "fast"
             print("\nKORA: OK (mode=fast)")
+            continue
+
+        if ul in ("think", "t", "reason"):
+            mode = "think"
+            print("\nKORA: OK (mode=think — QwQ reasoning)")
             continue
 
         if ul in ("council", "c", "/council"):
@@ -970,6 +1064,15 @@ def main():
             active = COUNCIL_LOCAL_MODELS if mode == "council" else [FAST_LOCAL_MODELS[0]]
             print("\nKORA: Current mode:", mode)
             print("KORA: Active engines:", ", ".join(active))
+            try:
+                import json as _json
+                _cf = os.path.join(BASE_DIR, "memory", "confinement_state.json")
+                _cs = _json.load(open(_cf))
+                print(f"KORA: K-SCP tier: {_cs.get('tier')} ({_cs.get('tier_name','?')}) — granted by {_cs.get('granted_by','?')} at {_cs.get('granted_at','?')}")
+                if _cs.get('note'):
+                    print(f"KORA: Note: {_cs.get('note')}")
+            except Exception as _e:
+                print(f"KORA: K-SCP state unreadable: {_e}")
             continue
 
         if ul == "selfcheck":
@@ -1042,7 +1145,9 @@ def main():
             )
             continue
 
-        if mode == "fast":
+        if mode == "think":
+            out = run_fast(u, model_override=QWEN_THINK_MODEL)
+        elif mode == "fast":
             out = run_fast(u)
         else:
             out = run_council(u)
