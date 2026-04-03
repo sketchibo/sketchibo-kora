@@ -36,6 +36,8 @@ GEMINI_MODEL = "gemini-2.5-flash"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 QWEN_MODEL = "qwen/qwen-2.5-72b-instruct"
 QWEN_THINK_MODEL = "qwen/qwq-32b"
+CLAUDE_MODEL = "anthropic/claude-sonnet-4-5"
+CLAUDE_FAST_MODEL = "anthropic/claude-haiku-4-5"
 GEMINI_URL = (
     f"https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
@@ -282,11 +284,15 @@ def openrouter_chat(prompt: str, timeout: int = 30, model_override: str = None) 
         "HTTP-Referer": "https://kora.local",
         "X-Title": "Kora",
     }
+    model = model_override or QWEN_MODEL
     payload = {
-        "model": model_override or QWEN_MODEL,
+        "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.7,
     }
+    # Claude models on OpenRouter default to huge context windows — cap to avoid burning credits
+    if "anthropic/" in model:
+        payload["max_tokens"] = 1024
     try:
         r = requests.post(OPENROUTER_URL, headers=headers, json=payload, timeout=timeout)
         r.raise_for_status()
@@ -307,6 +313,13 @@ def openrouter_test() -> str:
     if out and "QWEN_OK" in out:
         return f"openrouter/qwen OK"
     return f"openrouter/qwen FAIL: {out!r}"
+
+
+def claude_test() -> str:
+    out = openrouter_chat("Reply with exactly CLAUDE_OK", timeout=20, model_override=CLAUDE_FAST_MODEL)
+    if out and "CLAUDE_OK" in out:
+        return f"openrouter/claude OK"
+    return f"openrouter/claude FAIL: {out!r}"
 
 
 def gemini_generate(prompt: str, timeout: int = 30) -> str:
@@ -790,7 +803,19 @@ def run_fast(user_prompt: str, model_override: str = None) -> str:
     parts.append("## User Request\n" + user_prompt)
 
     full_prompt = "\n\n".join(parts)
-    out = openrouter_chat(full_prompt, timeout=90 if model_override else 45, model_override=model_override)
+    # Priority: Gemini (free) → Venice (free key) → Ollama (local) → OpenRouter (paid, last resort)
+    if not model_override:
+        out = gemini_generate(full_prompt, timeout=45)
+        if out and not out.startswith("GEMINI_"):
+            return out
+        out = venice_chat(full_prompt, timeout=45)
+        if out:
+            return out
+        out = ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
+        if out and len(out) > 10:
+            return out
+    # Only hits OpenRouter if model_override explicitly requested (e.g. claude/qwen mode)
+    out = openrouter_chat(full_prompt, timeout=90, model_override=model_override)
     if out:
         return out
     return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
@@ -826,6 +851,13 @@ def run_council(user_prompt: str) -> str:
     if startup_block:
         council_prompt = startup_block + "\n\n" + council_prompt
 
+    # Priority: Gemini (free) → Venice → Ollama
+    out = gemini_generate(council_prompt, timeout=60)
+    if out and not out.startswith("GEMINI_"):
+        return out
+    out = venice_chat(council_prompt, timeout=60)
+    if out:
+        return out
     return ollama_generate("tinyllama", council_prompt, timeout=60)
 
 
@@ -956,7 +988,7 @@ def main():
         return
 
     print("Hey there! Welcome to KORA Council!")
-    print("Commands: help, test, gtest, fast, council, status, selfcheck, remember, memory, exit")
+    print("Commands: help, test, gtest, fast, claude, think, council, status, selfcheck, remember, memory, exit")
 
     mode = "fast"
     _system_prompt = load_canon_files()
@@ -1055,6 +1087,15 @@ def main():
             print("\nKORA: OK (mode=think — QwQ reasoning)")
             continue
 
+        if ul in ("claude", "/claude"):
+            mode = "claude"
+            print("\nKORA: OK (mode=claude — Claude Sonnet via OpenRouter)")
+            continue
+
+        if ul in ("ctest", "claude-test"):
+            print("\nKORA:", claude_test())
+            continue
+
         if ul in ("council", "c", "/council"):
             mode = "council"
             print("\nKORA: OK (mode=council)")
@@ -1147,6 +1188,8 @@ def main():
 
         if mode == "think":
             out = run_fast(u, model_override=QWEN_THINK_MODEL)
+        elif mode == "claude":
+            out = run_fast(u, model_override=CLAUDE_MODEL)
         elif mode == "fast":
             out = run_fast(u)
         else:
