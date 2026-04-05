@@ -1,3 +1,0 @@
-#!/bin/bash
-
-# entire content of the file ...
