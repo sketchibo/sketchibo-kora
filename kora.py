@@ -1,4 +1,3 @@
-from pathlib import Path
 import kora_tools
 try:
     from kora_confinement import get_tier, log_confinement_event
@@ -32,7 +31,7 @@ load_dotenv(dotenv_path=os.path.join(BASE_DIR, ".env"))
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 VENICE_URL = "https://api.venice.ai/api/v1/chat/completions"
-VENICE_MODEL = "llama-3.3-70b"
+VENICE_MODEL = "venice-uncensored"
 GEMINI_MODEL = "gemini-2.5-flash"
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 QWEN_MODEL = "qwen/qwen-2.5-72b-instruct"
@@ -42,7 +41,7 @@ GEMINI_URL = (
     f"{GEMINI_MODEL}:generateContent"
 )
 
-FAST_LOCAL_MODELS = ["qwen2.5:7b"]  # local fallback only
+FAST_LOCAL_MODELS = ["qwen2.5:7b"]  # local fallback
 
 FREE_OPENROUTER_MODELS = [
     "meta-llama/llama-3.1-8b-instruct:free",
@@ -50,7 +49,7 @@ FREE_OPENROUTER_MODELS = [
     "qwen/qwen-2.5-7b-instruct:free",
 ]
 
-COUNCIL_MODELS = ["gemini", "openrouter", "venice"]
+COUNCIL_LOCAL_MODELS = ["qwen2.5:7b", "dolphin-phi:latest", "llama3.1:8b"]
 
 
 def env_key() -> str:
@@ -414,7 +413,7 @@ def load_canon_files() -> str:
     ]
 
     # Load K-SCP and LEX from scripts/ if present
-    for extra in ["docs/K-SCP.md", "core/identity/LEX.md"]:
+    for extra in ["../scripts/K-SCP.md", "../scripts/LEX.md"]:
         full = os.path.join(BASE_DIR, extra)
         if os.path.exists(full):
             with open(full, "r", encoding="utf-8") as f:
@@ -638,25 +637,31 @@ def self_reflect() -> str:
     return "\n".join(lines)
 
 
-def selfcheck():
-    mem = Path(BASE_DIR) / 'memory'
+def selfcheck() -> str:
+    report = []
+    report.append("SELFCHECK")
+    report.append(f"python: {sys.version.split()[0]}")
+    report.append(f"cwd: {BASE_DIR}")
+    report.append(f"venice_key: {'YES' if env_key() else 'NO'}")
+    report.append(f"gemini_key: {'YES' if gemini_key() else 'NO'}")
+    report.append(f"openrouter_key: {'YES' if openrouter_key() else 'NO'}")
+    report.append(f"kora.py: {'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora.py')) else 'NO'}")
+    report.append(
+        f"kora_interpreter.py: "
+        f"{'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora_interpreter.py')) else 'NO'}"
+    )
+    report.append(
+        f"kora_tools.py: "
+        f"{'YES' if os.path.exists(os.path.join(BASE_DIR, 'kora_tools.py')) else 'NO'}"
+    )
+    report.append(f"venice_test: {venice_test()}")
+    report.append(f"gemini_test: {gemini_test()}")
+    report.append(f"openrouter_test: {openrouter_test()}")
+    report.append("ollama_list:")
+    report.append(safe_cmd("ollama list"))
+    return "\n".join(report)
 
-    def chk(name):
-        f = mem / name
-        if not f.exists(): return f'{name}: MISSING'
-        if f.stat().st_size == 0: return f'{name}: EMPTY'
-        return f'{name}: OK'
 
-    lines = [
-        'SELF MEMORY CHECK',
-        chk('facts.jsonl'),
-        chk('lce_profile.json'),
-        chk('person_model.json'),
-        chk('trajectory.json'),
-    ]
-    result = '\n'.join(lines)
-    print(result)
-    return result
 
 
 def remember_fact(text: str) -> str:
@@ -763,97 +768,87 @@ def memory_view(kind: str = "all", fact_limit: int = 8, line_limit: int = 40) ->
 def run_fast(user_prompt: str, model_override: str = None) -> str:
     empathy_block = empathy_context_block(user_prompt, mode="fast")
     startup_brief = startup_context_brief(STARTUP_CONTEXT)
+
+    style_block = (
+        "[FAST MODE STYLE]\n"
+        "You are KORA.\n"
+        "Reply like a grounded, direct, slightly wry builder-companion.\n"
+        "Do not sound like customer support, therapy, or email.\n"
+        "Do not say things like 'How can I assist you today', 'I understand', or 'Could you provide details' unless truly necessary.\n"
+        "Use the Input mode from INTERACTION READ.\n"
+        "If Input mode is shell_blob: treat it as shell/log text and summarize, debug, or extract actions.\n"
+        "If Input mode is task_debug: prioritize concrete troubleshooting over reassurance.\n"
+        "If Input mode is voice_identity: stay at the level of voice, presence, identity, and meaning first; do not jump straight to implementation.\n"
+        "If Input mode is meta_system_talk: discuss KORA/Lyra/system behavior plainly.\n"
+        "If Input mode is rapport_banter: light playfulness is fine.\n"
+        "Do not default back to active goals or boot tasks unless the user is asking about them.\n"
+        "Answer the actual sentence in front of you.\n"
+        "Keep it natural, concise, and human-readable.\n"
+        "Do not wrap the answer in labels like 'Response:' or 'KORA's Response:'.\n"
+        "[/FAST MODE STYLE]"
+    )
+
+    # Load identity and handoffs per 1337 Spec
     identity_core = load_identity_core()
     handoffs = load_handoffs(limit=2)
 
     parts = []
-    # Identity comes first per 1337 Spec
+    # Identity comes first
     if identity_core:
         parts.append(identity_core)
     if handoffs:
         parts.append(handoffs)
     if startup_brief:
         parts.append(startup_brief)
+    parts.append(style_block)
     if empathy_block:
         parts.append(empathy_block)
-    parts.append("## Memory\n" + memory_view("facts"))
     parts.append("## User Request\n" + user_prompt)
 
     full_prompt = "\n\n".join(parts)
-
-    # 1. Gemini
-    out = gemini_generate(full_prompt, timeout=45)
-    if out and not out.startswith("GEMINI_"):
-        return out
-
-    # 2. OpenRouter free
+    
+    # Try OpenRouter free models first
     for model in FREE_OPENROUTER_MODELS:
         out = openrouter_chat(full_prompt, timeout=45, model_override=model)
         if out:
             return out
-
-    # 3. Venice
-    out = venice_chat(full_prompt, timeout=45)
-    if out:
-        return out
-
-    # 4. Local fallback
+    
+    # Fallback to local Ollama
     return ollama_generate(FAST_LOCAL_MODELS[0], full_prompt, timeout=60)
+
 
 
 def run_council(user_prompt: str) -> str:
     facts = facts_preview(limit=5)
-    memory_block = memory_view("facts")
     state = self_reflect()
     context = load_canon_files().strip()
-    handoffs = load_handoffs(limit=2)
+    empathy_block = empathy_context_block(user_prompt, mode="council")
 
-    council_prompt = f"""
-You are KORA.
+    if len(context) > 5000:
+        context = context[:5000] + "\n...[trimmed for council mode]"
 
-PROFILE CONTEXT:
-{context}
+    council_prompt = (
+        "You are KORA. Answer like a builder, not a manager.\n\n"
+        "PROFILE CONTEXT:\n"
+        f"{context}\n\n"
+        "CURRENT STATE:\n"
+        f"{state}\n\n"
+        "INTERACTION READ:\n"
+        f"{empathy_block}\n\n"
+        "PINNED FACTS:\n"
+        f"{facts}\n\n"
+        "USER REQUEST:\n"
+        f"{user_prompt}\n\n"
+        "Use these headings exactly:\n"
+        "Healthy\nFragile\nMissing\nNext Move\n"
+    )
 
-HANDOFFS:
-{handoffs}
+    startup_block = startup_context_text(STARTUP_CONTEXT)
+    if startup_block:
+        council_prompt = startup_block + "\n\n" + council_prompt
 
-STATE:
-{state}
+    return ollama_generate("tinyllama", council_prompt, timeout=60)
 
-FACTS:
-{facts}
-
-MEMORY:
-{memory_block}
-
-USER:
-{user_prompt}
-
-Respond with:
-Healthy
-Fragile
-Missing
-Next Move
-"""
-
-    # 1. Gemini
-    out = gemini_generate(council_prompt, timeout=60)
-    if out and not out.startswith("GEMINI_"):
-        return out
-
-    # 2. OpenRouter
-    for model in FREE_OPENROUTER_MODELS:
-        out = openrouter_chat(council_prompt, timeout=60, model_override=model)
-        if out:
-            return out
-
-    # 3. Venice
-    out = venice_chat(council_prompt, timeout=60)
-    if out:
-        return out
-
-    # 4. Local fallback
-    return ollama_generate(FAST_LOCAL_MODELS[0], council_prompt, timeout=60)
 
 
 def handle_cli() -> bool:
@@ -901,6 +896,12 @@ def handle_cli() -> bool:
     if arg == "pulse":
         from kora_pulse import run_pulse
         print(run_pulse(verbose=True))
+        return True
+
+    if arg in ("terminal", "term", "ui"):
+        import subprocess
+        term_path = os.path.join(BASE_DIR, "kora_terminal.py")
+        subprocess.run([sys.executable, term_path])
         return True
 
     return False
@@ -967,64 +968,6 @@ def resume_brief() -> str:
     except Exception as ex:
         return f"Resume error: {ex}"
     return "\n".join(lines)
-
-
-def load_handoffs(limit: int = 3) -> str:
-    """Load recent handoff files from memory/handoffs/*.json"""
-    handoffs_dir = os.path.join(BASE_DIR, "memory", "handoffs")
-    if not os.path.exists(handoffs_dir):
-        return ""
-    
-    files = sorted(glob.glob(os.path.join(handoffs_dir, "*.json")), reverse=True)
-    if not files:
-        return ""
-    
-    chunks = []
-    for handoff_path in files[:limit]:
-        try:
-            with open(handoff_path, "r", encoding="utf-8") as f:
-                handoff = json.load(f)
-            
-            # Extract key handoff info
-            summary = handoff.get("summary", "")
-            instruction = handoff.get("handoff_instruction", "")
-            source = handoff.get("source", "unknown")
-            ts = handoff.get("handoff_ts", "")[:16]  # Just date+time
-            
-            if summary or instruction:
-                chunks.append(f"[Handoff {ts} from {source}]: {summary}")
-                if instruction:
-                    chunks.append(f"Instruction: {instruction}")
-        except Exception:
-            continue
-    
-    if chunks:
-        return "## Recent Handoffs\n" + "\n".join(chunks)
-    return ""
-
-
-def load_identity_core() -> str:
-    """Load core identity files in order per 1337 Spec."""
-    identity_files = [
-        ("core/identity/CHARTER.md", "CHARTER"),
-        ("core/identity/IDENTITY.md", "IDENTITY"),
-        ("core/identity/USER.md", "USER"),
-        ("core/identity/SOUL.md", "SOUL"),
-    ]
-    
-    chunks = []
-    for file_path, label in identity_files:
-        full_path = os.path.join(BASE_DIR, file_path)
-        if os.path.exists(full_path):
-            try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    text = f.read().strip()
-                    if text:
-                        chunks.append(f"## {label}\n{text}")
-            except Exception:
-                continue
-    
-    return "\n\n".join(chunks)
 
 
 def main():
@@ -1243,3 +1186,39 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# ── Identity & Handoff Loading (added 2026-04-05) ─────────────────────────
+
+def load_identity_core() -> str:
+    """Load CHARTER → IDENTITY → USER → SOUL per 1337 Spec."""
+    base = Path(__file__).parent / "core" / "identity"
+    files = ["CHARTER.md", "IDENTITY.md", "USER.md", "SOUL.md"]
+    chunks = []
+    for fname in files:
+        fpath = base / fname
+        if fpath.exists():
+            chunks.append(f"## {fname}\n{fpath.read_text()}")
+    return "\n\n".join(chunks)
+
+
+def load_handoffs(limit: int = 3) -> str:
+    """Load recent session handoffs from Claude/OpenClaw."""
+    handoff_dir = Path(__file__).parent / "memory" / "handoffs"
+    if not handoff_dir.exists():
+        return ""
+    
+    files = sorted(handoff_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    chunks = ["## Recent Handoffs"]
+    
+    for fpath in files[:limit]:
+        try:
+            data = json.loads(fpath.read_text())
+            ts = data.get("handoff_ts", "unknown")
+            src = data.get("source", "unknown")
+            summary = data.get("summary", "")[:200]
+            chunks.append(f"[Handoff {ts} from {src}]: {summary}")
+        except Exception:
+            continue
+    
+    return "\n\n".join(chunks) if len(chunks) > 1 else ""
