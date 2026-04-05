@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shoot Fathom</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; overflow: hidden; font-family: monospace; }
+  canvas { display: block; cursor: crosshair; }
+  #score { position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+           color: #0ff; font-size: 20px; text-shadow: 0 0 10px #0ff; }
+  #msg { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+         color: #f0f; font-size: 32px; text-shadow: 0 0 20px #f0f;
+         display: none; text-align: center; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="score">SCORE: 0 | MISSES: 0/5</div>
+<div id="msg"></div>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+c.width = window.innerWidth;
+c.height = window.innerHeight;
+
+let score = 0, misses = 0, hits = 0;
+let shots = [];
+let splats = [];
+let fathoms = [];
+let frame = 0;
+
+function spawnFathom() {
+  const dir = Math.random() > 0.5 ? 1 : -1;
+  fathoms.push({
+    x: dir === 1 ? -60 : c.width + 60,
+    y: c.height - 60 - Math.random() * 80,
+    dir,
+    speed: 2 + Math.random() * 3 + score * 0.3,
+    wobble: 0,
+    alive: true,
+    flash: 0
+  });
+}
+
+function drawFathom(f) {
+  ctx.save();
+  ctx.translate(f.x, f.y + Math.sin(f.wobble) * 5);
+  ctx.scale(f.dir, 1);
+
+  // glow
+  if (f.flash > 0) {
+    ctx.shadowColor = '#f00';
+    ctx.shadowBlur = 30;
+  } else {
+    ctx.shadowColor = '#f0f';
+    ctx.shadowBlur = 10;
+  }
+
+  // body
+  ctx.fillStyle = f.flash > 0 ? '#f44' : '#7c4dff';
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 28, 18, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // head
+  ctx.fillStyle = f.flash > 0 ? '#f66' : '#9c6fff';
+  ctx.beginPath();
+  ctx.ellipse(28, -2, 16, 13, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // eye
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.arc(36, -5, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  ctx.arc(37, -5, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // gills
+  ctx.strokeStyle = '#ff69b4';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath();
+    ctx.moveTo(-5 + i*8, -18);
+    ctx.quadraticCurveTo(-5 + i*8 + 4, -30, -5 + i*8, -22);
+    ctx.stroke();
+  }
+
+  // tail
+  ctx.fillStyle = '#5a2dcc';
+  ctx.beginPath();
+  ctx.moveTo(-28, 0);
+  ctx.quadraticCurveTo(-45, -15 + Math.sin(f.wobble*2)*8, -50, 5);
+  ctx.quadraticCurveTo(-40, 15, -28, 8);
+  ctx.fill();
+
+  // legs
+  ctx.fillStyle = '#7c4dff';
+  for (let i = -1; i <= 1; i += 2) {
+    ctx.beginPath();
+    ctx.ellipse(10*i, 16, 5, 10, 0.3*i, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawSplat(s) {
+  ctx.save();
+  ctx.globalAlpha = s.life / 30;
+  ctx.fillStyle = '#f0f';
+  ctx.shadowColor = '#f0f';
+  ctx.shadowBlur = 20;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const r = (1 - s.life/30) * 40;
+    ctx.beginPath();
+    ctx.arc(s.x + Math.cos(a)*r, s.y + Math.sin(a)*r, 4, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawShot(s) {
+  ctx.save();
+  ctx.globalAlpha = s.life / 10;
+  ctx.strokeStyle = '#ff0';
+  ctx.shadowColor = '#ff0';
+  ctx.shadowBlur = 15;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(s.x, s.y);
+  ctx.lineTo(s.x, c.height);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// stars
+const stars = Array.from({length: 80}, () => ({
+  x: Math.random()*c.width, y: Math.random()*c.height*0.7,
+  r: Math.random()*2, a: Math.random()
+}));
+
+function drawBG() {
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, c.width, c.height);
+
+  // stars
+  stars.forEach(s => {
+    s.a += 0.02;
+    ctx.fillStyle = `rgba(255,255,255,${0.3 + 0.3*Math.sin(s.a)})`;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+    ctx.fill();
+  });
+
+  // ground
+  const g = ctx.createLinearGradient(0, c.height-50, 0, c.height);
+  g.addColorStop(0, '#1a0030');
+  g.addColorStop(1, '#0d001a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, c.height-50, c.width, 50);
+
+  // water shimmer
+  ctx.strokeStyle = 'rgba(100,0,200,0.3)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    ctx.beginPath();
+    ctx.moveTo(0, c.height - 50 + i*10 + Math.sin(frame*0.05+i)*3);
+    ctx.lineTo(c.width, c.height - 50 + i*10 + Math.sin(frame*0.05+i+1)*3);
+    ctx.stroke();
+  }
+}
+
+function loop() {
+  frame++;
+  drawBG();
+
+  // spawn
+  if (frame % Math.max(60 - score*2, 20) === 0) spawnFathom();
+
+  // draw shots
+  shots = shots.filter(s => s.life > 0);
+  shots.forEach(s => { s.life--; drawShot(s); });
+
+  // draw splats
+  splats = splats.filter(s => s.life > 0);
+  splats.forEach(s => { s.life--; drawSplat(s); });
+
+  // update + draw fathoms
+  fathoms = fathoms.filter(f => {
+    if (!f.alive) return false;
+    f.wobble += 0.15;
+    f.x += f.speed * f.dir;
+    if (f.flash > 0) f.flash--;
+
+    // escaped
+    if ((f.dir === 1 && f.x > c.width + 80) || (f.dir === -1 && f.x < -80)) {
+      misses++;
+      updateHUD();
+      if (misses >= 5) gameOver();
+      return false;
+    }
+    drawFathom(f);
+    return true;
+  });
+
+  if (misses < 5) requestAnimationFrame(loop);
+}
+
+function updateHUD() {
+  document.getElementById('score').textContent = `SCORE: ${score} | MISSES: ${misses}/5`;
+}
+
+function gameOver() {
+  const msg = document.getElementById('msg');
+  msg.style.display = 'block';
+  msg.innerHTML = `FATHOM ESCAPED!<br><span style="font-size:18px">Score: ${score} | Tap to restart</span>`;
+  c.onclick = () => { score=0; misses=0; fathoms=[]; splats=[]; shots=[]; msg.style.display='none'; updateHUD(); c.onclick=shoot; loop(); };
+}
+
+function shoot(e) {
+  const rect = c.getBoundingClientRect();
+  const mx = (e.clientX || e.touches[0].clientX) - rect.left;
+  const my = (e.clientY || e.touches[0].clientY) - rect.top;
+
+  shots.push({x: mx, y: my, life: 10});
+
+  let hit = false;
+  fathoms.forEach(f => {
+    const dx = f.x - mx, dy = f.y - my;
+    if (Math.sqrt(dx*dx+dy*dy) < 45) {
+      f.alive = false;
+      hit = true;
+      score += 10;
+      splats.push({x: f.x, y: f.y, life: 30});
+      updateHUD();
+    }
+  });
+}
+
+c.onclick = shoot;
+c.ontouchstart = e => { e.preventDefault(); shoot(e); };
+
+spawnFathom();
+loop();
+</script>
+</body>
+</html>

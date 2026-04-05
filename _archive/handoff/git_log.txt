@@ -1,0 +1,10 @@
+29557e9 (HEAD -> main) Save local work before pull
+c01e1c7 (origin/main) Add startup context boot loading
+5ee4fee Add KORA Video Director Phase 1 planner
+a4e5fc7 feat: initialize mode and move while loop inside main()
+2de863d feat: add interpreter action handling for kora.py
+e68cbe8 feat: add text-to-speech functionality and update user input handling
+64a7d56 feat: integrate interpreter into main loop without altering existing flow
+98ea984 feat: add task execution functions
+89d7e90 feat: add xtts installation command
+84137b7 feat: update command handling to accept rough commands

@@ -1,0 +1,24 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+set -e
+
+# Disable cloud dependencies
+rm -f cloud_connector.py || true
+
+# Activate local persistence
+mkdir -p memory
+
+# Configure Termux boot
+mkdir -p ~/.termux/boot
+echo '#!/data/data/com.termux/files/usr/bin/bash
+exec 2>&1
+exec >> ~/kora_local/logs/$(date +\%Y\%m\%d).log
+cd ~/kora_local
+exec ./kora' > ~/.termux/boot/kora
+chmod +x ~/.termux/boot/kora
+
+# Setup device sync
+adb connect motoe15.local || true
+
+echo 'Bootstrap complete'
+exec ./kora

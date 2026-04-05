@@ -1,0 +1,9 @@
+KORA is no longer just a chat system. It is becoming a directing engine for AI-generated media.
+
+Instead of treating writing, images, and video as separate tasks, it can break a transcript into meaningful visual beats.
+
+Each beat can be matched to the right type of shot, the right model, and the right amount of effort depending on the available time budget.
+
+In a quick mode, KORA can produce a rough but coherent visual plan. In a longer mode, it can generate better prompts, stronger hero shots, and more polished continuity.
+
+Eventually, KORA will route work across image APIs, video APIs, and tools like Sora, turning one transcript into a complete production pipeline.

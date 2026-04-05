@@ -1,3 +1,4 @@
+import kora_tools
 import os
 import sys
 import json
@@ -7,8 +8,10 @@ import subprocess
 from datetime import datetime
 from typing import Dict, Optional, Any
 from kora_interpreter import interpret
+import kora_tools
 from core.empathy.state_estimator import estimate_state
 from core.empathy.response_policy import decide_response_policy, render_empathy_block
+from core.empathy.input_classifier import classify_input
 
 import requests
 from dotenv import load_dotenv
@@ -137,7 +140,7 @@ def load_rapport_state() -> Dict[str, Any]:
 def load_trajectory_state() -> Dict[str, Any]:
     return load_json_file(TRAJECTORY_PATH, {})
 
-def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mode: str, trajectory_hint: str = "") -> None:
+def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mode: str, trajectory_hint: str = "", classification: Dict[str, Any] | None = None) -> None:
     os.makedirs(os.path.dirname(SIGNALS_PATH), exist_ok=True)
     row = {
         "ts": datetime.now().isoformat(),
@@ -146,6 +149,7 @@ def log_signal(user_text: str, state: Dict[str, Any], policy: Dict[str, Any], mo
         "trajectory_hint": trajectory_hint,
         "state": state,
         "policy": policy,
+        "classification": classification or {},
     }
     try:
         with open(SIGNALS_PATH, "a", encoding="utf-8") as f:
@@ -157,16 +161,17 @@ def empathy_context_block(user_text: str, mode: str = "chat") -> str:
     person_model = load_person_model()
     rapport_state = load_rapport_state()
     trajectory_state = load_trajectory_state()
+    classification = classify_input(user_text)
 
     state = estimate_state(user_text, person_model=person_model, rapport=rapport_state)
-    policy = decide_response_policy(user_text, state, rapport=rapport_state)
-    block = render_empathy_block(state, policy)
+    policy = decide_response_policy(user_text, state, rapport=rapport_state, classification=classification)
+    block = render_empathy_block(state, policy, classification=classification)
 
     trajectory_hint = str((trajectory_state or {}).get("current_arc", "")).strip()
     if trajectory_hint:
         block = block + "\nTrajectory hint: " + trajectory_hint
 
-    log_signal(user_text, state, policy, mode=mode, trajectory_hint=trajectory_hint)
+    log_signal(user_text, state, policy, mode=mode, trajectory_hint=trajectory_hint, classification=classification)
     return block
 
 def ollama_generate(model: str, prompt: str, timeout: int = 180) -> str:
@@ -697,11 +702,17 @@ def run_fast(user_prompt: str) -> str:
         "You are KORA.\n"
         "Reply like a grounded, direct, slightly wry builder-companion.\n"
         "Do not sound like customer support, therapy, or email.\n"
-        "Do not default back to the active goal unless the user asked about it.\n"
+        "Do not say things like 'How can I assist you today', 'I understand', or 'Could you provide details' unless truly necessary.\n"
+        "Use the Input mode from INTERACTION READ.\n"
+        "If Input mode is shell_blob: treat it as shell/log text and summarize, debug, or extract actions.\n"
+        "If Input mode is task_debug: prioritize concrete troubleshooting over reassurance.\n"
+        "If Input mode is voice_identity: stay at the level of voice, presence, identity, and meaning first; do not jump straight to implementation.\n"
+        "If Input mode is meta_system_talk: discuss KORA/Lyra/system behavior plainly.\n"
+        "If Input mode is rapport_banter: light playfulness is fine.\n"
+        "Do not default back to active goals or boot tasks unless the user is asking about them.\n"
         "Answer the actual sentence in front of you.\n"
-        "If the user sounds frustrated but playful, one brief wry line is allowed.\n"
-        "If the user is casual, be natural and concise.\n"
-        "Do not ask generic follow-up questions unless they are actually needed.\n"
+        "Keep it natural, concise, and human-readable.\n"
+        "Do not wrap the answer in labels like 'Response:' or 'KORA's Response:'.\n"
         "[/FAST MODE STYLE]"
     )
 
@@ -828,12 +839,61 @@ def main():
     mode = "fast"
     _system_prompt = load_canon_files()
 
+    pending_action = None
+
     while True:
         u = input("\nYou: ").strip()
         if not u:
             continue
 
         ul = u.lower()
+
+        if ul == "approve":
+            if pending_action:
+                if pending_action["intent"] == "patch_file":
+                    args = pending_action["args"]
+                    print("\nKORA:", kora_tools.patch_file(args["path"], args["instruction"]))
+                    pending_action = None
+                    continue
+            print("\nKORA: No pending action.")
+            continue
+
+        if ul == "cancel":
+            if pending_action:
+                pending_action = None
+                print("\nKORA: Pending action cleared.")
+                continue
+            print("\nKORA: No pending action.")
+            continue
+
+        intent = interpret(u)
+        if intent["mode"] == "action":
+            i = intent["intent"]
+            args = intent["args"]
+
+            if i == "run_shell":
+                print("\nKORA:", kora_tools.run_shell(args["command"]))
+                continue
+
+            elif i == "write_file":
+                print("\nKORA:", kora_tools.write_file(args["path"], args["content"]))
+                continue
+
+            elif i == "read_file":
+                print("\nKORA:\n" + kora_tools.read_file(args["path"]))
+                continue
+
+            elif i == "patch_file":
+                pending_action = {
+                    "intent": "patch_file",
+                    "args": args
+                }
+                print("\nKORA: [PENDING ACTION]")
+                print(f"KORA: File: {args['path']}")
+                print(f"KORA: Instruction: {args['instruction']}")
+                print("KORA: Type APPROVE to run or CANCEL to drop.")
+                continue
+
 
         if ul in ("exit", "quit"):
             break

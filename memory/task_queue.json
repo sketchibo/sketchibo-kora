@@ -1,0 +1,13 @@
+[
+  {
+    "id": 1775357931,
+    "title": "TV playback",
+    "command": "adb shell input keyevent 82 && sleep 2 && adb shell input tap 960 540 && sleep 3 && adb shell input tap 540 960 && sleep 2 && adb shell input tap 960 540",
+    "note": null,
+    "trigger": "now",
+    "status": "done",
+    "created": "2026-04-04T19:58:51.297398",
+    "result": "(done)",
+    "completed": "2026-04-04T19:59:08.095206"
+  }
+]

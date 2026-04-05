@@ -1,9 +1,7 @@
 import os
 import json
-import subprocess
 import requests
 from typing import Dict, List, Optional
-from kora_tools import list_files, read_file, tail_file, search_files, get_system_status
 
 OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 
@@ -16,9 +14,11 @@ FAST_LOCAL_MODELS = ["qwen2.5:7b"]
 # COUNCIL mode: try these if present
 COUNCIL_LOCAL_MODELS = ["qwen2.5:7b", "dolphin-phi:latest", "llama3.1:8b"]
 
+
 def env_key() -> str:
     # Read fresh every call (so exporting then rerunning works reliably)
     return os.getenv("VENICE_API_KEY", "").strip()
+
 
 def ollama_generate(model: str, prompt: str, timeout: int = 60) -> str:
     payload = {"model": model, "prompt": prompt, "stream": False}
@@ -29,6 +29,7 @@ def ollama_generate(model: str, prompt: str, timeout: int = 60) -> str:
     except Exception as e:
         return f"[LOCAL ERROR {model}: {e}]"
 
+
 def _venice_request(prompt: str, headers: Dict[str, str], timeout: int = 30) -> requests.Response:
     payload = {
         "model": VENICE_MODEL,
@@ -36,6 +37,7 @@ def _venice_request(prompt: str, headers: Dict[str, str], timeout: int = 30) -> 
         "temperature": 0
     }
     return requests.post(VENICE_URL, headers=headers, json=payload, timeout=timeout)
+
 
 def venice_chat(prompt: str, timeout: int = 30) -> Optional[str]:
     """
@@ -84,6 +86,7 @@ def venice_chat(prompt: str, timeout: int = 30) -> Optional[str]:
 
     return None
 
+
 def venice_test() -> str:
     """
     /venice-test -> print VENICE_OK or VENICE_401/403/TIMEOUT without leaking the key
@@ -113,6 +116,7 @@ def venice_test() -> str:
 
     return last if "last" in locals() else "VENICE_FAIL"
 
+
 def merge_locals(drafts: Dict[str, str]) -> str:
     # Simple merge that won't explode
     parts = []
@@ -120,6 +124,7 @@ def merge_locals(drafts: Dict[str, str]) -> str:
         if v and isinstance(v, str):
             parts.append(f"[{k}] {v.strip()}")
     return "\n\n".join(parts).strip()
+
 
 def load_canon_files() -> str:
     canon_files = [
@@ -134,12 +139,14 @@ def load_canon_files() -> str:
             system_prompt += file.read() + "\n\n"
     return system_prompt.strip()
 
+
 def run_fast(user_prompt: str) -> str:
     # Venice is optional and must not block.
     v = venice_chat(user_prompt, timeout=20)
     if v:
         return v
     return ollama_generate(FAST_LOCAL_MODELS[0], user_prompt, timeout=60)
+
 
 def run_council(user_prompt: str) -> str:
     drafts = {}
@@ -154,6 +161,7 @@ def run_council(user_prompt: str) -> str:
     )
     return ollama_generate("qwen2.5:7b", final_prompt, timeout=60)
 
+
 def post_filter(text: str) -> str:
     # Replace any mentions of backend models
     replacements = {
@@ -166,64 +174,18 @@ def post_filter(text: str) -> str:
         text = text.replace(old, new)
     return text
 
-def save_tts(text):
-    api = os.getenv("ELEVENLABS_API_KEY", "").strip()
-    voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
-    if not api or not voice or not text.strip():
-        return
 
-    out_path = os.path.expanduser("~/kora/last_reply.mp3")
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice}?output_format=mp3_44100_128"
-    payload = json.dumps({
-        "text": text,
-        "model_id": "eleven_multilingual_v2"
-    })
-
-    try:
-        subprocess.run(
-            [
-                "curl", "-sS", "-X", "POST", url,
-                "-H", f"xi-api-key: {api}",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
-                "--output", out_path,
-            ],
-            check=True,
-            timeout=60,
-        )
-        if os.path.exists(out_path) and os.path.getsize(out_path) > 1000:
-            print("[TTS saved: ~/kora/last_reply.mp3]")
-    except Exception:
-        pass
-
-def handle_interpreter_actions(user_input: str) -> str:
-    interpret_result = interpret(user_input)
-    if interpret_result["mode"] == "action":
-        action = interpret_result["intent"]
-       if action == "list_files":
-            return list_files(interpret_result["args"]["path"])
-        elif action == "read_file":
-            return read_file(interpret_result["args"]["path"])
-        elif action == "tail_file":
-            return tail_file(interpret_result["args"]["path"], interpret_result["args"]["lines"])
-        elif action == "search_files":
-            return search_files(interpret_result["args"]["query"], interpret_result["args"]["root"])
-            return "Unknown command"
-        elif action == "get_system_status":
-            return get_system_status()
 def main():
-    mode = "fast"  # Initialize mode here
     print("Hey there! Welcome to KORA Council!")
     print("Commands: help, test, fast, council, status, exit")
 
+    mode = "fast"
     system_prompt = load_canon_files()
 
     while True:
-        raw = input("\nYou: ").strip()
-        u = raw.lower()
+        u = input("\nYou: ").strip().lower()
         if not u:
             continue
-
         if u in ("exit", "quit"):
             break
 
@@ -256,11 +218,33 @@ def main():
             print("\nKORA: xtts installation completed.")
             continue
 
-        # Handle interpreter actions
-        response = handle_interpreter_actions(u)
-        if response != "Unknown command":
-            print("\nKORA:", response)
-            save_tts(response)
+        if mode == "fast":
+            out = run_fast(u)
+        else:
+            out = run_council(u)
+
+        final_response = post_filter(out)
+        print("\nKORA:", final_response)
+
+        # TTS save logic
+        elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+        elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID")
+        if elevenlabs_api_key and elevenlabs_voice_id:
+            import subprocess
+            from tempfile import NamedTemporaryFile
+            from pydub import AudioSegment
+
+            # Convert text to speech
+            command = f"curl -X POST -H 'Content-Type: application/json' -H 'Authorization: Bearer {elevenlabs_api_key}' --data '{{\"text\":\"{final_response}\",\"voice_id\":\"{elevenlabs_voice_id}\"}}' 'https://api.elevenlabs.io/v1/text-to-speech/{elevenlabs_voice_id}'"
+            with NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
+                temp_file.write(subprocess.check_output(command, shell=True))
+                temp_file_path = temp_file.name
+
+            # Convert mp3 to wav
+            audio = AudioSegment.from_mp3(temp_file_path)
+            audio.export(f"~/kora/last_reply.mp3", format="mp3")
+
+            print("[TTS saved: ~/kora/last_reply.mp3]")
 
 if __name__ == "__main__":
     main()

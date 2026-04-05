@@ -1,0 +1,34 @@
+{
+  "handoff_ts": "2026-04-05T06:49:00-07:00",
+  "source": "Claude (OpenClaw)",
+  "to": "Kora",
+  "from_session": "OpenClaw main session",
+  "user": "Kayle",
+  "summary": "Deep integration session. Ingested KORA 1337 Spec, Master Update 2026-03-29, Cora Soul Memory Ops, Development Diary, and 6 other documents from Google Drive. Updated canonical identity files in OpenClaw workspace.",
+  "what_happened": [
+    "User returned after months away, frustrated with OpenClaw session handling (+ button creates isolated sessions)",
+    "Retrieved 10 documents from Google Drive via sub-agent",
+    "Ingested full KORA vision: Prime Directive, One Mind Multiple Brains, Local-First, Continuity Model",
+    "Updated SOUL.md, USER.md with integrated lineage",
+    "Confirmed Ollama running locally at 127.0.0.1:11434",
+    "Name clarification: K-O-R-A (voice-to-text: Quora, Cora)",
+    "Current KORA state: 4-5/10 maturity, continuity real, judgment/action routing still weak"
+  ],
+  "key_insights": {
+    "prime_directive": "KORA is canonical local-first intelligence; Claude attaches/detaches without breaking continuity",
+    "core_model": "One mind, multiple brains: KORA (memory), Claude (reasoning), Ollama (fallback)",
+    "local_first": "All critical properties exist locally: memory, identity, goals, continuity state",
+    "current_problem": "Natural language → actionable task judgment (interpreter gating)",
+    "next_priority": "Minimal judgment gate: route to action only when confidence high, otherwise chat"
+  },
+  "user_state": {
+    "name": "Kayle Moreland",
+    "situation": "Needs money, welfare April 26, East End, dad needs help",
+    "preferences": "Direct, step-by-step, exact keypresses, minimal fluff, no artificial cheerfulness",
+    "wants": "Continuity, memory, never reset, system that grows with him",
+    "current_project": "KORA local-first AI OS, crypto trading (trader.py, ktrader.py planned)"
+  },
+  "tokens_burned": "~20k this session",
+  "handoff_instruction": "User is switching to local KORA now to save tokens. Load continuity. Continue thread.",
+  "claude_status": "Ready to re-attach when needed for high-reasoning tasks"
+}
