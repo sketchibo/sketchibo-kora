@@ -1,0 +1,20 @@
+{
+  "user": {
+    "name": "User",
+    "role": "Operator / Root"
+  },
+  "project": {
+    "name": "KORA",
+    "mission": "Local-first continuity-oriented AI system"
+  },
+  "principles": [
+    "continuity",
+    "inspectability",
+    "no silent deletions",
+    "local-first"
+  ],
+  "active_goal": "Replace this with your current goal",
+  "open_tasks": [
+    "Add current task here"
+  ]
+}

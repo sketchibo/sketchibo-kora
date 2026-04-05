@@ -62,3 +62,18 @@ Thumbs.db
 # One-off files that snuck in
 abc.txt
 Connection
+
+# Personal/runtime state remediation
+config.json
+*.mp3
+
+memory/*.json
+!memory/*.example.json
+!memory/guidance.md
+
+crypto/*.json
+!crypto/*.example.json
+
+# Keep source scripts tracked
+!crypto/*.py
+!crypto/*.sh
