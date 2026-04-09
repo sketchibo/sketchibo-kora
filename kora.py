@@ -890,14 +890,19 @@ def handle_cli() -> bool:
         print(memory_view(kind))
         return True
 
-
     if arg == "pulse":
         from kora_pulse import run_pulse
         print(run_pulse(verbose=True))
         return True
 
-    return False
+    if arg == "terminal":
+        import subprocess
+        from pathlib import Path
+        term_path = str(Path(__file__).resolve().parent / "kora_terminal.py")
+        subprocess.run([sys.executable, term_path])
+        return True
 
+    return False
 
 ACTION_TIER_REQUIREMENTS = {
     'get_system_status': 0,
