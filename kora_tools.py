@@ -4,6 +4,24 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
 
+def tor_fetch(url, timeout=30):
+    """Fetch a URL through Tor. Works on clearnet and .onion sites."""
+    try:
+        result = subprocess.run(
+            ['torsocks', 'curl', '-s', '--max-time', str(timeout), '-L', url],
+            capture_output=True, text=True, timeout=timeout+5
+        )
+        out = result.stdout.strip()
+        if not out:
+            return f"Empty response (stderr: {result.stderr[:200]})"
+        # Strip HTML tags for readability
+        import re as _re
+        out = _re.sub(r'<[^>]+>', ' ', out)
+        out = _re.sub(r'\s+', ' ', out).strip()
+        return out[:3000]
+    except Exception as e:
+        return f"tor_fetch error: {e}"
+
 # ── ADB ──────────────────────────────────────────────────────────────────
 BOX_IP = "192.168.1.211:5555"
 
@@ -77,11 +95,14 @@ def web_search(query, n=5):
 # ── TTS ──────────────────────────────────────────────────────────────────
 def speak(text):
     try:
-        pipe = os.path.expanduser('~/.tts_pipe')
-        if os.path.exists(pipe):
-            with open(pipe, 'w') as f: f.write(text)
-            return '(speaking)'
-        subprocess.Popen(['bash', os.path.expanduser('~/scripts/speak.sh'), text])
+        # Kora's voice: en-US female, pitch 1.1, rate 1.0
+        subprocess.Popen([
+            'termux-tts-speak',
+            '-l', 'en', '-n', 'US',
+            '-p', '1.1',
+            '-r', '0.85',
+            text
+        ])
         return '(speaking)'
     except Exception as e:
         return f"TTS error: {e}"
@@ -103,6 +124,49 @@ def task_status():
         return status_summary()
     except Exception as e:
         return f"ERROR: {e}"
+
+def remember_fact(text, source='kora'):
+    """Append a fact to Kora's persistent memory."""
+    try:
+        import json
+        from datetime import datetime
+        facts_path = BASE_DIR / 'memory' / 'facts.jsonl'
+        facts_path.parent.mkdir(parents=True, exist_ok=True)
+        row = {'ts': datetime.now().isoformat(), 'kind': 'fact', 'source': source, 'text': text}
+        with facts_path.open('a', encoding='utf-8') as f:
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+        return f'fact saved: {text[:60]}'
+    except Exception as e:
+        return f'ERROR: {e}'
+
+def lce_log(entry_type, content, context=''):
+    """Log a life compression entry — lived experience, intention, outcome, or thought."""
+    try:
+        import json
+        from datetime import datetime
+        lce_path = BASE_DIR / 'memory' / 'lce_ledger.jsonl'
+        lce_path.parent.mkdir(parents=True, exist_ok=True)
+        row = {'ts': datetime.now().isoformat(), 'type': entry_type, 'content': content, 'context': context}
+        with lce_path.open('a', encoding='utf-8') as f:
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+        return f'lce entry logged: [{entry_type}] {content[:60]}'
+    except Exception as e:
+        return f'ERROR: {e}'
+
+def take_snapshot():
+    """Dump Kora's current state — models, memory, files — as a JSON snapshot."""
+    try:
+        import json
+        snap = {
+            'ts': __import__('datetime').datetime.now().isoformat(),
+            'ollama_models': subprocess.run(['ollama', 'list'], capture_output=True, text=True).stdout.strip(),
+            'memory_files': [str(p) for p in (BASE_DIR / 'memory').glob('*') if p.is_file()],
+            'facts_count': sum(1 for _ in open(BASE_DIR / 'memory' / 'facts.jsonl')) if (BASE_DIR / 'memory' / 'facts.jsonl').exists() else 0,
+            'uptime': subprocess.run(['uptime'], capture_output=True, text=True).stdout.strip(),
+        }
+        return json.dumps(snap, indent=2)
+    except Exception as e:
+        return f'ERROR: {e}'
 
 def run_shell(command):
     try:
@@ -198,3 +262,34 @@ def kraken_trade(action: str, pair: str, amount: float, price: float = None):
         return "[ERROR] Command timed out."
     except Exception as e:
         return f"[ERROR] {e}"
+
+def get_signals():
+    """Pull trading signals from all sources: whale moves, 4chan /biz/, Reddit, CoinGecko."""
+    try:
+        from kora_signals import get_all_signals, print_report
+        ranked, raw = get_all_signals(verbose=False)
+        lines = ["=== SIGNAL REPORT ==="]
+        lines.append("TOP BULLISH:")
+        for sym, score in ranked[:5]:
+            if score > 0:
+                sources = list(set(s["source"] for s in raw if s.get("symbol") == sym and "error" not in s))
+                lines.append(f"  {sym}: score={score:+d} [{', '.join(sources)}]")
+        lines.append("TOP BEARISH:")
+        for sym, score in ranked[-3:]:
+            if score < 0:
+                lines.append(f"  {sym}: score={score:+d}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Signal error: {e}"
+
+
+def portfolio_snapshot():
+    """Get current Kraken portfolio value and save a snapshot."""
+    try:
+        result = subprocess.run(
+            ["python3", str(BASE_DIR / "kora_snapshot_tracker.py")],
+            capture_output=True, text=True, timeout=30, cwd=str(BASE_DIR)
+        )
+        return result.stdout.strip() or result.stderr.strip()
+    except Exception as e:
+        return f"Snapshot error: {e}"

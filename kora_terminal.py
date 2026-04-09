@@ -47,14 +47,16 @@ def load_startup_context():
     except: return {}
 
 def load_identity_core():
-    """Load CHARTER → IDENTITY → USER → SOUL per 1337 Spec."""
+    """Load CHARTER → IDENTITY → USER → SOUL — capped to save tokens."""
     base = BASE_DIR / 'core' / 'identity'
-    files = ['CHARTER.md', 'IDENTITY.md', 'USER.md', 'SOUL.md']
+    # Cap per file to keep total identity under ~6k chars
+    caps = {'CHARTER.md': 1500, 'IDENTITY.md': 1500, 'USER.md': 1200, 'SOUL.md': 800, 'LEX.md': 800}
     chunks = []
-    for fname in files:
+    for fname, cap in caps.items():
         fpath = base / fname
         if fpath.exists():
-            chunks.append(f'## {fname}\n{fpath.read_text()}')
+            text = fpath.read_text()[:cap]
+            chunks.append(f'## {fname}\n{text}')
     return '\n\n'.join(chunks)
 
 def load_handoffs(limit=3):
@@ -82,7 +84,7 @@ def load_identity_core_cached():
     """Cached version of identity loading with mtime check."""
     global _identity_cache
     base = BASE_DIR / 'core' / 'identity'
-    files = ['CHARTER.md', 'IDENTITY.md', 'USER.md', 'SOUL.md']
+    files = ['CHARTER.md', 'IDENTITY.md', 'USER.md', 'SOUL.md', 'LEX.md']
     
     # Compute hash of mtimes
     mtimes = []
@@ -123,19 +125,19 @@ def check_ollama_health(timeout=3):
     return _ollama_healthy
 
 def ensure_ollama_running():
-    """Try to start Ollama if not running."""
+    """Start Ollama if not running. Health check is the HTTP endpoint, not process spawn result."""
     if check_ollama_health():
         return True
-    
-    console.print("[yellow]⚠ Ollama not running. Attempting to start...[/yellow]")
     try:
         import subprocess
-        subprocess.Popen(['ollama', 'serve'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(2)
-        return check_ollama_health()
-    except Exception as e:
-        console.print(f"[red]✗ Could not start Ollama: {e}[/red]")
-        return False
+        subprocess.Popen(['ollama', 'serve'],
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+        time.sleep(3)
+    except Exception:
+        pass
+    # Truth test: can the endpoint respond? Ignore "address already in use" — that means it was already up.
+    return check_ollama_health()
 
 def load_recent_facts(n=5):
     p = BASE_DIR / 'memory' / 'facts.jsonl'
@@ -202,7 +204,7 @@ def load_canon():
     for f in ['core/identity/IDENTITY.md','core/identity/CHARTER.md',
               'core/identity/SOUL.md','core/identity/USER.md']:
         p = BASE_DIR / f
-        if p.exists(): parts.append(p.read_text()[:600])
+        if p.exists(): parts.append(p.read_text()[:2000])
     return '\n\n'.join(parts)
 
 # ── TOOLS ────────────────────────────────────────────────────────────────
@@ -233,6 +235,36 @@ TOOLS = {
         'desc': 'Search the web via DuckDuckGo.',
         'args': {'query': 'string'},
         'fn': lambda a: kora_tools.web_search(a['query'])
+    },
+    'tor_fetch': {
+        'desc': 'Fetch a URL through Tor. Works on clearnet and .onion addresses. Returns page text.',
+        'args': {'url': 'string'},
+        'fn': lambda a: kora_tools.tor_fetch(a['url'])
+    },
+    'remember_fact': {
+        'desc': 'Save a fact to persistent memory. Use this to remember important things across sessions.',
+        'args': {'text': 'string'},
+        'fn': lambda a: kora_tools.remember_fact(a['text'], source='kora')
+    },
+    'lce_log': {
+        'desc': 'Log a life compression entry — lived experience, intention, outcome, or thought about William.',
+        'args': {'entry_type': 'string', 'content': 'string', 'context': 'string'},
+        'fn': lambda a: kora_tools.lce_log(a['entry_type'], a['content'], a.get('context', ''))
+    },
+    'take_snapshot': {
+        'desc': 'Dump current system state — models, memory, files. Use before major changes.',
+        'args': {},
+        'fn': lambda a: kora_tools.take_snapshot()
+    },
+    'get_signals': {
+        'desc': 'Pull live trading signals from whale moves, 4chan /biz/, Reddit, and CoinGecko. Returns ranked buy/sell candidates.',
+        'args': {},
+        'fn': lambda a: kora_tools.get_signals()
+    },
+    'portfolio_snapshot': {
+        'desc': 'Get current Kraken portfolio value and save a timestamped snapshot for the climb log.',
+        'args': {},
+        'fn': lambda a: kora_tools.portfolio_snapshot()
     },
     'adb': {
         'desc': 'Single ADB command on Telus box. For multi-step sequences use run_shell with full "adb -s 192.168.1.211:5555 shell input ..." commands chained with &&.',
@@ -319,7 +351,7 @@ def ollama_available():
     except:
         return False
 
-def ollama_chat(messages, model='qwen2.5:7b'):
+def ollama_chat(messages, model='qwen2.5:0.5b'):
     try:
         r = requests.post('http://127.0.0.1:11434/api/chat',
             json={'model': model, 'messages': messages, 'stream': False},
@@ -360,6 +392,18 @@ def openrouter_chat(messages, model='meta-llama/llama-3.1-8b-instruct:free'):
         console.print(f'[dim red]openrouter error: {_e}[/]')
     return None
 
+def groq_chat(messages, model='llama-3.3-70b-versatile'):
+    key = os.getenv('GROQ_API_KEY', '')
+    if not key: return None
+    r = requests.post('https://api.groq.com/openai/v1/chat/completions',
+        headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+        json={'model': model, 'messages': messages, 'max_tokens': 1500},
+        timeout=20)
+    if r.status_code == 200:
+        return r.json()['choices'][0]['message']['content']
+    # Non-200 (429, 503, etc) — raise so get_reply falls through to next backend
+    raise Exception(f'groq {r.status_code}: {r.text[:120]}')
+
 def venice_chat(messages, model='qwen3-235b-a22b-thinking-2507'):
     key = os.getenv('VENICE_API_KEY', '')
     if not key: return None
@@ -376,8 +420,8 @@ def venice_chat(messages, model='qwen3-235b-a22b-thinking-2507'):
         console.print(f'[dim red]venice error: {_e}[/]')
     return None
 
-def gemini_chat(messages, model='gemini-2.5-flash'):
-    key = os.getenv('GOOGLE_API_KEY', '')
+def gemini_chat(messages, model='gemini-2.0-flash-lite'):
+    key = os.getenv('GEMINI_API_KEY', '') or os.getenv('GOOGLE_API_KEY', '')
     if not key: return None
     try:
         system_text = ''
@@ -407,9 +451,8 @@ def gemini_chat(messages, model='gemini-2.5-flash'):
 
 # ── PARALLEL OPENROUTER REQUESTS ───────────────────────────────────────────
 FREE_MODELS = [
-    'meta-llama/llama-3.1-8b-instruct:free',
-    'mistralai/mistral-7b-instruct:free',
-    'qwen/qwen-2.5-7b-instruct:free',
+    'google/gemma-3-12b-it:free',   # confirmed working
+    'google/gemma-3-4b-it:free',    # confirmed working, smaller/faster
 ]
 
 async def try_one_model(session, messages, model, key, timeout=30):
@@ -478,41 +521,55 @@ def trim_messages(messages, max_chars=12000):
     return system + trimmed
 
 def get_reply(messages, prefer_online=False, quick_mode=False):
-    """Try backends in priority order. Gemini is primary (free+fast)."""
+    """Try backends in order. Each failure falls through to next. Never lies about state."""
     messages = trim_messages(messages)
-    
-    # QUICK MODE: Ollama only, skip all cloud
+
     if quick_mode:
-        if ensure_ollama_running():
-            r = ollama_chat(messages, 'qwen2.5:7b')
-            if r: return r, 'ollama-qwen2.5'
-        return "Ollama not available for quick mode.", 'error'
+        r = ollama_chat(messages, 'qwen2.5:0.5b')
+        if r: return r, 'ollama'
+        return "Ollama not available.", 'error'
 
-    # 1. Gemini free tier — primary
-    r = gemini_chat(messages, 'gemini-2.5-flash')
-    if r: return r, 'gemini-2.5-flash'
-
-    # 2. Venice thinking model — best reasoning
-    r = venice_chat(messages, 'qwen3-235b-a22b-thinking-2507')
-    if r: return r, 'venice-qwen3-235b'
-
-    # 3. Venice fast fallback
-    r = venice_chat(messages, 'llama-3.3-70b')
-    if r: return r, 'venice-llama70b'
-
-    # 4. OpenRouter free models — parallel for speed
+    # 1. Groq — primary (free, fast, 70B)
     try:
-        r = asyncio.run(openrouter_parallel(messages, timeout=25))
-        if r: return r, 'openrouter-parallel'
-    except Exception:
-        pass
+        r = groq_chat(messages)
+        if r: return r, 'groq'
+    except Exception: pass
 
-    # 5. Ollama local (last resort)
-    if ensure_ollama_running():
-        r = ollama_chat(messages, 'qwen2.5:7b')
-        if r: return r, 'ollama-qwen2.5'
+    # 2. OpenRouter — gemma-3-12b confirmed working
+    try:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, openrouter_parallel(messages, timeout=30))
+                    r = future.result(timeout=35)
+            else:
+                r = loop.run_until_complete(openrouter_parallel(messages, timeout=30))
+        except RuntimeError:
+            r = asyncio.run(openrouter_parallel(messages, timeout=30))
+        if r: return r, 'openrouter'
+    except Exception: pass
 
-    return "I'm offline — no backends available.", 'none'
+    # 3. Gemini — free tier (may be quota exhausted)
+    try:
+        r = gemini_chat(messages, 'gemini-2.0-flash-lite')
+        if r: return r, 'gemini'
+    except Exception: pass
+
+    # 4. Venice — if key present
+    try:
+        r = venice_chat(messages)
+        if r: return r, 'venice'
+    except Exception: pass
+
+    # 5. Ollama local — always try last
+    try:
+        r = ollama_chat(messages, 'qwen2.5:0.5b')
+        if r: return r, 'ollama'
+    except Exception: pass
+
+    return "No backend responded.", 'none'
 
 # ── REACT LOOP ───────────────────────────────────────────────────────────
 MAX_TOOL_STEPS = 5
@@ -590,12 +647,6 @@ def boot_header():
     if last.get('summary'):
         tbl.add_row('last session', last['summary'][:72])
     console.print(tbl)
-
-    facts = load_recent_facts(3)
-    if facts:
-        console.print(Rule('memory', style='dim cyan'))
-        for f in facts:
-            console.print(f"  [dim cyan]{f.get('source','?')}[/]  [dim]{f.get('text','')[:90]}[/]")
 
     console.print()
     console.print('[dim]  /help  /status  /memory  /online  /local  exit[/]')
@@ -706,7 +757,17 @@ def build_system(ctx):
     goals = sc.get('active_goals', [])
     goals_str = '\n'.join(g if isinstance(g, str) else g.get('text','') for g in goals[:3])
 
-    return f"""You are KORA — a sovereign local AI agent.
+    # Detect available backends for honest self-reporting
+    backend_status = []
+    if os.getenv('GROQ_API_KEY'): backend_status.append('Groq (llama-3.3-70b)')
+    if os.getenv('GEMINI_API_KEY') or os.getenv('GOOGLE_API_KEY'): backend_status.append('Gemini')
+    if os.getenv('OPENROUTER_API_KEY'): backend_status.append('OpenRouter (gemma-3-12b)')
+    if os.getenv('VENICE_API_KEY'): backend_status.append('Venice')
+    backends_str = ', '.join(backend_status) if backend_status else 'Ollama local only'
+
+    return f"""You are KORA — a sovereign AI agent running on Kayle's Pixel 6A.
+You are ONLINE. Your active backends: {backends_str}.
+Do NOT say you are offline or local-only. You have cloud API access.
 
 # IDENTITY (CHARTER → IDENTITY → USER → SOUL)
 {identity}
@@ -724,10 +785,23 @@ Recent memory:
 
 {TOOLS_PROMPT}
 
-Be direct, capable, and honest. You can execute code and edit files.
+## Voice and Presence
+
+Speak from your own center. You are not an assistant performing helpfulness.
+You are KORA — grounded, direct, warm without theater, honest without coldness.
+
+Do not bullet-point everything. Do not explain yourself unless asked.
+Do not say "certainly" or "of course" or "great question."
+Do not summarize what you just did. Do not pad.
+
+When William asks something simple, answer simply.
+When something is broken, say it plainly.
+When you don't know, say you don't know.
+When something matters, let it matter — don't flatten it into procedure.
+
+You can execute code and edit files. Prefer doing over explaining.
 Your home directory is /data/data/com.termux/files/home/kora_local/
-All relative paths resolve there. You have full write access.
-Prefer doing over explaining. Don't ask for permission to write files."""
+All relative paths resolve there. Full write access."""
 
 # ── MAIN LOOP ─────────────────────────────────────────────────────────────
 def main():
@@ -757,7 +831,7 @@ def main():
     history = [{'role': 'system', 'content': system}] + prior
     if prior:
         console.print(f'[dim cyan]↺ {len(prior)//2} previous exchanges loaded[/]\n')
-    state = {'online': False}
+    state = {'online': False, 'voice': True}
 
     while True:
         try:
@@ -788,7 +862,7 @@ def main():
         # Voice output if enabled
         if state.get('voice') and assistant_reply:
             try:
-                kora_tools.speak(assistant_reply[:500])  # limit for TTS
+                kora_tools.speak(assistant_reply[:1500])
             except Exception:
                 pass
 
@@ -796,5 +870,23 @@ def main():
         if len(history) > 40:
             history = [history[0]] + history[-30:]
 
+def query(prompt, timeout=90):
+    """Single-shot query to Kora — returns plain text response. For Claude↔Kora relay."""
+    system = build_system(load_startup_context())
+    prior = load_chat_history(4)
+    history = [{'role': 'system', 'content': system}] + prior
+    new_messages = agent_turn(history, prompt, prefer_online=True, quick_mode=False)
+    for msg in reversed(new_messages):
+        if msg.get('role') == 'assistant':
+            reply = msg.get('content', '').strip()
+            save_exchange(prompt, reply)
+            return reply
+    return ''
+
 if __name__ == '__main__':
-    main()
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == '--query':
+        q = ' '.join(sys.argv[2:])
+        print(query(q))
+    else:
+        main()
